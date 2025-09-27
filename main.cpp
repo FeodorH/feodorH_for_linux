@@ -19,10 +19,12 @@ int main() {
         if (input == "\\q") {//exit 2
             break;
         }
+
+        int a = 0;
         
         std::cout<<input<<"\n";
         //std::cout << input << ": command not found" << std::endl;
     }
-    
+    //new code
     return 0;
 }
