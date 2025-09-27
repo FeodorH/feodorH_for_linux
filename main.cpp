@@ -28,7 +28,9 @@ int main() {
 
         history_file<<input<<"\n";
         
-        std::cout<<input<<" :)\n";
+        if (input.substr(0, 6) == "echo \""&&input[input.size() - 1]=='\"') {
+            std::cout << input.substr(6,input.size()-7) << "\n";
+        }
 
     }
 
