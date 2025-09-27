@@ -12,7 +12,7 @@ int main() {
     while (true) {
         std::cout << "$ ";
         
-        if (!std::getline(std::cin, input)) {
+        if (!std::getline(std::cin, input)||(input == "\\q")) {
             // Ctrl+D
             std::cout << "\nExit" << std::endl;
             break;
