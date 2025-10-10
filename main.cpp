@@ -1,6 +1,7 @@
 #include <iostream>
 #include <string>
 #include <fstream>
+#include <cstdlib> 
 
 int main() {
   /// Flush after every std::cout / std:cerr
@@ -30,6 +31,24 @@ int main() {
         
         if (input.substr(0, 6) == "echo \""&&input[input.size() - 1]=='\"') {
             std::cout << input.substr(6,input.size()-7) << "\n";
+        }else if(input=="\\e $PATH"){
+            const char* path_env = std::getenv("PATH");
+            if (path_env == nullptr) {
+                std::cout << "$PATH not found!" << std::endl;
+            }
+            else{
+            std::string t = std::string(path_env);
+                int i = 0;
+                for(int j = 0;j< t.size(); j++){
+                    if(t.at(j)==':'){
+                        std::cout<<t.substr(i,j-i)<<"\n";
+                        i = j + 1;
+                    }
+                }
+                if (i < t.size()) {
+                    std::cout << t.substr(i) << std::endl;
+                }
+            }
         }
         else{
             std::cout<<"command not found!\n";
