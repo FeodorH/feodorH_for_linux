@@ -31,6 +31,9 @@ int main() {
         if (input.substr(0, 6) == "echo \""&&input[input.size() - 1]=='\"') {
             std::cout << input.substr(6,input.size()-7) << "\n";
         }
+        else{
+            std::cout<<"command not found!\n";
+        }
 
     }
 
