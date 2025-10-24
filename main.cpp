@@ -6,6 +6,13 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <sstream>
+#include <csignal>
+
+volatile sig_atomic_t sighup_received = 0;//флаг для работы SIGHUP
+
+void sighup_handler(int) {
+    sighup_received = 1;
+}
 
 std::vector<std::string> split_arguments(const std::string& input) {//для разбивки входящего потока в вектор
     std::vector<std::string> args;
@@ -25,7 +32,7 @@ bool execute_external_command(const std::vector<std::string>& args) {//для з
     pid_t pid = fork();//клонируем процессы
     
     if (pid == 0) {//у дочернего pid == 0
-        std::vector<char*> exec_args;
+        std::vector<char*> exec_args;//перевод в строки в стиле C
         for (const auto& arg : args) {
             exec_args.push_back(const_cast<char*>(arg.c_str()));
         }
@@ -55,15 +62,32 @@ int main() {
     std::cerr << std::unitbuf;
 
     std::ofstream history_file("/home/main_user/kubsh_history.txt", std::ios::app);
+    history_file << std::unitbuf;//for rebuffing
+
+    std::signal(SIGHUP, sighup_handler);
 
     if (!history_file.is_open()) {
         std::cerr << "Error: cannot open history file!" << std::endl;
         return 1;
     }
 
-    history_file << std::unitbuf;//for rebuffing
+    std::cout << "PID: " << getpid() << std::endl;
+
+    /*struct sigaction sa;
+    sa.sa_handler = sighup_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGHUP, &sa, NULL);*/
 
     while (true) {
+
+        if (sighup_received) {
+            std::cout << "\nConfiguration reloaded\n";
+            //std::cout << "$ " << std::flush;
+            sighup_received = 0;
+            continue;
+        }
+
         std::cout << "$ ";
         std::string input;
         
@@ -74,7 +98,7 @@ int main() {
         }
 
         history_file<<input<<"\n";
-        
+
         if (input.substr(0, 6) == "echo \""&&input[input.size() - 1]=='\"') {
             std::cout << input.substr(6,input.size()-7) << "\n";
         }else if(input=="\\e $PATH"){
