@@ -7,6 +7,10 @@
 #include <sys/wait.h>
 #include <sstream>
 #include <csignal>
+#include <cstdio>
+#include <memory>
+#include <stdexcept>
+#include <array>
 
 volatile sig_atomic_t sighup_received = 0;//флаг для работы SIGHUP
 
@@ -55,6 +59,60 @@ bool execute_external_command(const std::vector<std::string>& args) {//для з
         return false;
     }
 }
+
+//number 10{
+// Функция для выполнения команды и получения вывода
+std::string execute_command(const char* cmd) {
+    std::array<char, 128> buffer;
+    std::string result;
+    
+    FILE* pipe = popen(cmd, "r");//создаёт дочерний процесс для запуска команды и через pipe передаёт данные после выполнения
+    if (!pipe) {
+        throw std::runtime_error("popen() failed!");
+    }
+    
+    try {
+        while (fgets(buffer.data(), buffer.size(), pipe) != nullptr) {//построчно добавляет результат
+            result += buffer.data();
+        }
+    } catch (...) {
+        pclose(pipe);
+        throw;
+    }
+    
+    pclose(pipe);
+    return result;
+}
+
+// Функция для обработки \l команды
+bool handle_partition_list(const std::vector<std::string>& args) {
+    if (args.size() != 2 || args[0] != "\\l") {
+        return false;
+    }
+    
+    const std::string& disk = args[1];
+    
+    if (disk.find("/dev/") != 0) {
+        std::cout << "Error: " << disk << " is not a valid device\n";
+        return true;
+    }
+    
+    std::cout << "Partition information for " << disk << ":\n";
+    
+    // Пробуем разные команды, начиная с тех, что не требуют sudo
+    std::string command = "lsblk " + disk + " 2>/dev/null";
+    int result = system(command.c_str());
+    
+    if (result != 0) {
+        std::cout << "Try these commands manually:\n";
+        std::cout << "  fdisk -l " << disk << "\n";
+        std::cout << "  sudo fdisk -l " << disk << "\n";
+        std::cout << "  parted " << disk << " print\n";
+    }
+    
+    return true;
+}
+//}
 
 int main() {
   /// Flush after every std::cout / std:cerr
@@ -124,13 +182,21 @@ int main() {
             std::vector<std::string> args = split_arguments(input);
             
             if (!args.empty()) {
-                bool executed = execute_external_command(args);
-                if (!executed) {
-                    std::cout << "Error: command not found!\n";
+                // Сначала проверяем специальную команду \l
+                if (args[0] == "\\l" && args.size() == 2) {
+                    bool handled = handle_partition_list(args);
+                    if (!handled) {
+                        std::cout << "Error: invalid \\l usage. Use: \\l /dev/sda\n";
+                    }
+                } else {
+                    // Выполняем обычную команду
+                    bool executed = execute_external_command(args);
+                    if (!executed) {
+                        std::cout << "Error: command not found!\n";
+                    }
                 }
             }
         }
-
     }
 
     history_file.close();
