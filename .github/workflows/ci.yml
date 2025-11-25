@@ -1,0 +1,37 @@
+name: C++ Shell CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Build package in C++ container
+      run: |
+        # Собираем в нашем контейнере с компилятором
+        docker run --rm \
+          -v $PWD:/workspace \
+          feodorh/kubsh-tests \
+          bash -c "make && make deb"
+      
+    - name: Run tests in lecturer's container
+      run: |
+        # Тестируем в контейнере лектора с тестами
+        docker run --rm \
+          -v $PWD:/mnt \
+          tyvik/kubsh_test:master \
+          bash -c "
+            cd /mnt && \
+            apt-get update && \
+            apt-get install -y ./kubsh.deb && \
+            cd /opt && \
+            pytest -v --log-cli-level=10
+          "
