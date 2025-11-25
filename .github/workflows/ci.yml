@@ -14,24 +14,50 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       
-    - name: Build package in C++ container
+    - name: Build C++ container locally
       run: |
-        # Собираем в нашем контейнере с компилятором
+        echo "=== Building C++ container ==="
+        docker build -t kubsh-builder .
+        echo "=== Container built successfully ==="
+      
+    - name: Build shell and create package
+      run: |
+        echo "=== Building shell ==="
         docker run --rm \
           -v $PWD:/workspace \
-          feodorh/kubsh-tests \
-          bash -c "make && make deb"
+          kubsh-builder \
+          bash -c "
+            cd /workspace && \
+            echo 'Files in workspace:' && \
+            ls -la && \
+            echo '=== Compiling ===' && \
+            make && \
+            echo '=== Creating package ===' && \
+            make deb && \
+            echo '=== Package created ===' && \
+            ls -la *.deb
+          "
+      
+    - name: Verify package
+      run: |
+        echo "=== Verifying package ==="
+        ls -la *.deb
+        file kubsh.deb || echo "No deb file found"
       
     - name: Run tests in lecturer's container
       run: |
-        # Тестируем в контейнере лектора с тестами
+        echo "=== Running tests ==="
         docker run --rm \
           -v $PWD:/mnt \
           tyvik/kubsh_test:master \
           bash -c "
+            set -e
+            echo 'Installing package...' && \
             cd /mnt && \
             apt-get update && \
             apt-get install -y ./kubsh.deb && \
+            echo 'Package installed successfully' && \
+            echo 'Running tests...' && \
             cd /opt && \
             pytest -v --log-cli-level=10
           "
