@@ -26,14 +26,13 @@ volatile sig_atomic_t sighup_received = 0;
 std::atomic<bool> monitor_running{true};
 
 // Очередь для операций с пользователями
-std::queue<std::pair<std::string, bool>> user_operations; // <username, is_add_operation>
+std::queue<std::pair<std::string, bool>> user_operations;
 std::mutex queue_mutex;
 
 void sighup_handler(int) {
     sighup_received = 1;
 }
 
-// Функция для выполнения операций с пользователями в основном потоке
 void process_user_operations() {
     std::lock_guard<std::mutex> lock(queue_mutex);
     
@@ -104,7 +103,6 @@ void process_user_operations() {
     }
 }
 
-// Упрощенные функции для добавления операций в очередь
 void queue_add_user(const std::string& username) {
     std::lock_guard<std::mutex> lock(queue_mutex);
     user_operations.push({username, true});
@@ -117,7 +115,6 @@ void queue_delete_user(const std::string& username) {
     std::cout << "Queued user deletion: " << username << std::endl;
 }
 
-// Функция для мониторинга изменений в каталоге users
 void monitor_users_directory(const std::string& users_dir) {
     int inotify_fd = inotify_init();
     if (inotify_fd < 0) {
@@ -167,8 +164,6 @@ void monitor_users_directory(const std::string& users_dir) {
                     if (event->mask & IN_ISDIR) {
                         std::string username = event->name;
                         std::cout << "=== Directory created: " << username << " ===" << std::endl;
-                        
-                        // Добавляем в очередь вместо непосредственного выполнения
                         std::thread(queue_add_user, username).detach();
                     }
                 }
@@ -176,8 +171,6 @@ void monitor_users_directory(const std::string& users_dir) {
                     if (event->mask & IN_ISDIR) {
                         std::string username = event->name;
                         std::cout << "=== Directory deleted: " << username << " ===" << std::endl;
-                        
-                        // Добавляем в очередь вместо непосредственного выполнения
                         std::thread(queue_delete_user, username).detach();
                     }
                 }
@@ -189,7 +182,6 @@ void monitor_users_directory(const std::string& users_dir) {
     close(inotify_fd);
 }
 
-// Функция для создания VFS с пользователями
 void setup_users_vfs() {
     std::string home_dir = getenv("HOME");
     std::string users_dir = home_dir + "/users";
@@ -250,7 +242,6 @@ void setup_users_vfs() {
     monitor_thread.detach();
 }
 
-// Остальные функции остаются без изменений
 std::vector<std::string> split_arguments(const std::string& input) {
     std::vector<std::string> args;
     std::stringstream ss(input);
@@ -277,15 +268,15 @@ bool execute_external_command(const std::vector<std::string>& args) {
         
         execvp(exec_args[0], exec_args.data());
         
-        std::cerr << "Error: command '" << args[0] << "' not found\n";
-        exit(1);
+        std::cerr << args[0] << ": command not found\n";
+        exit(127);
         
     } else if (pid > 0) {
         int status;
         waitpid(pid, &status, 0);
         return true;
     } else {
-        std::cerr << "Error: fork create failed!\n";
+        std::cerr << "Error: fork failed\n";
         return false;
     }
 }
@@ -317,24 +308,83 @@ bool handle_partition_list(const std::vector<std::string>& args) {
     return true;
 }
 
+//Обработчик команд 3000
+bool handle_internal_command(const std::vector<std::string>& args) {
+    if (args.empty()) return false;
+    
+    const std::string& cmd = args[0];
+    
+    if (cmd == "exit" || cmd == "\\q") {
+        monitor_running = false;
+        return true;
+    }
+    else if (cmd == "echo" && args.size() > 1) {
+        // Обработка echo команды
+        for (size_t i = 1; i < args.size(); ++i) {
+            if (i > 1) std::cout << " ";
+            
+            // Убираем кавычки если есть
+            std::string arg = args[i];
+            if (arg.size() >= 2 && arg.front() == '"' && arg.back() == '"') {
+                arg = arg.substr(1, arg.size() - 2);
+            }
+            std::cout << arg;
+        }
+        std::cout << std::endl;
+        return true;
+    }
+    else if (cmd == "\\e" && args.size() == 2) {
+        // Обработка переменных окружения
+        std::string var = args[1];
+        if (var == "$PATH" || var == "PATH") {
+            const char* path_env = std::getenv("PATH");
+            if (path_env) {
+                std::string path_str = path_env;
+                size_t start = 0;
+                size_t end = path_str.find(':');
+                while (end != std::string::npos) {
+                    std::cout << path_str.substr(start, end - start) << std::endl;
+                    start = end + 1;
+                    end = path_str.find(':', start);
+                }
+                if (start < path_str.length()) {
+                    std::cout << path_str.substr(start) << std::endl;
+                }
+            }
+            return true;
+        }
+        else if (var.find('$') == 0) {
+            const char* value = std::getenv(var.substr(1).c_str());
+            if (value) {
+                std::cout << value << std::endl;
+            }
+            return true;
+        }
+    }
+    else if (cmd == "\\l" && args.size() == 2) {
+        return handle_partition_list(args);
+    }
+    
+    return false;
+}
+
 int main() {
+    // Отключаем буферизацию для корректной работы с тестами
+    std::cout << std::unitbuf;
+    std::cerr << std::unitbuf;
+    
     // Создаем VFS с пользователями при запуске
     setup_users_vfs();
 
-    std::cout << std::unitbuf;
-    std::cerr << std::unitbuf;
-
-    std::ofstream history_file("/home/main_user/kubsh_history.txt", std::ios::app);
-    history_file << std::unitbuf;
-
-    std::signal(SIGHUP, sighup_handler);
-
+    // История команд
+    std::string history_path = std::string(getenv("HOME")) + "/.kubsh_history";
+    std::ofstream history_file(history_path, std::ios::app);
+    
     if (!history_file.is_open()) {
-        std::cerr << "Error: cannot open history file!" << std::endl;
-        return 1;
+        std::cerr << "Warning: cannot open history file! History will not be saved." << std::endl;
     }
 
-    std::cout << "PID: " << getpid() << std::endl;
+    std::signal(SIGHUP, sighup_handler);
 
     while (true) {
         if (sighup_received) {
@@ -343,58 +393,54 @@ int main() {
             continue;
         }
 
-        // Обрабатываем операции с пользователями в основном потоке
+        // Обрабатываем операции с пользователями
         process_user_operations();
 
         std::cout << "$ ";
         std::string input;
         
         if (!std::getline(std::cin, input)||(input == "\\q")) {
-            std::cout << "\nExit" << std::endl;
-            monitor_running = false;
+            // Ctrl+D или EOF
+            std::cout << std::endl;
             break;
         }
 
-        history_file << input << "\n";
+        if (input.empty()) {
+            continue;
+        }
 
-        if (input.substr(0, 6) == "echo \"" && input[input.size() - 1]=='\"') {
-            std::cout << input.substr(6, input.size()-7) << "\n";
-        } else if(input == "\\e $PATH") {
-            const char* path_env = std::getenv("PATH");
-            if (path_env == nullptr) {
-                std::cout << "Error: $PATH not found!" << std::endl;
-            } else {
-                std::string t = std::string(path_env);
-                int i = 0;
-                for(int j = 0; j < t.size(); j++) {
-                    if(t.at(j) == ':') {
-                        std::cout << t.substr(i, j-i) << "\n";
-                        i = j + 1;
-                    }
-                }
-                if (i < t.size()) {
-                    std::cout << t.substr(i) << std::endl;
-                }
-            }
-        } else {
-            std::vector<std::string> args = split_arguments(input);
-            
-            if (!args.empty()) {
-                if (args[0] == "\\l" && args.size() == 2) {
-                    bool handled = handle_partition_list(args);
-                    if (!handled) {
-                        std::cout << "Error: invalid \\l usage. Use: \\l /dev/sda\n";
-                    }
-                } else {
-                    bool executed = execute_external_command(args);
-                    if (!executed) {
-                        std::cout << "Error: command not found!\n";
-                    }
-                }
+        // Сохраняем в историю
+        if (history_file.is_open()) {
+            history_file << input << std::endl;
+        }
+
+        std::vector<std::string> args = split_arguments(input);
+        
+        if (args.empty()) {
+            continue;
+        }
+
+        // Сначала пробуем обработать как внутреннюю команду
+        if (handle_internal_command(args)) {
+            if (args[0] == "exit" || args[0] == "\\q") {
+                break;
             }
         }
+        // Затем как внешнюю команду
+        else if (!execute_external_command(args)) {
+            std::cerr << args[0] << ": command not found" << std::endl;
+        }
+        
+        // Сбрасываем вывод после каждой команды
+        std::cout.flush();
+        std::cerr.flush();
     }
 
-    history_file.close();
+    monitor_running = false;
+    
+    if (history_file.is_open()) {
+        history_file.close();
+    }
+    
     return 0;
 }
