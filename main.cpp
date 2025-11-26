@@ -130,7 +130,7 @@ void monitor_users_directory(const std::string& users_dir) {
         return;
     }
     
-    std::cout << "Monitoring directory: " << users_dir << std::endl;
+    //std::cout << "Monitoring directory: " << users_dir << std::endl;
     
     char buffer[4096] __attribute__ ((aligned(__alignof__(struct inotify_event))));
     const struct inotify_event *event;
@@ -194,7 +194,7 @@ void setup_users_vfs() {
             std::cerr << "Error: cannot create users directory " << users_dir << std::endl;
             return;
         }
-        std::cout << "Created users directory: " << users_dir << std::endl;
+        //std::cout << "Created users directory: " << users_dir << std::endl;
     }
     
     // Получаем всех пользователей системы
@@ -403,7 +403,7 @@ int main() {
         if (sighup_received) {
             std::cout << "Configuration reloaded" << std::endl;;
             sighup_received = 0;
-            //continue;
+            continue;
         }
 
         // Обрабатываем операции с пользователями
