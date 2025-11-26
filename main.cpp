@@ -401,7 +401,7 @@ int main() {
 
     while (true) {
         if (sighup_received) {
-            std::cout << "\nConfiguration reloaded" << std::endl;;
+            std::cout << "Configuration reloaded" << std::endl;;
             sighup_received = 0;
             //continue;
         }
