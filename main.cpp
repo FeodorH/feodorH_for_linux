@@ -399,8 +399,6 @@ int main() {
 
     std::signal(SIGHUP, sighup_handler);
 
-    bool is_test_mode = (std::getenv("TEST_MODE") != nullptr);
-
     while (true) {
         if (sighup_received) {
             std::cout << "Configuration reloaded" << std::endl;;
@@ -411,9 +409,7 @@ int main() {
         // Обрабатываем операции с пользователями
         process_user_operations();
 
-        if (!is_test_mode) {
-            std::cout << "$ ";
-        }
+        //std::cout << "$ ";
         std::string input;
         
         if (!std::getline(std::cin, input)) {
