@@ -401,9 +401,9 @@ int main() {
 
     while (true) {
         if (sighup_received) {
-            std::cout << "Configuration reloaded" << std::endl;;
+            std::cout << "\nConfiguration reloaded" << std::endl;;
             sighup_received = 0;
-            continue;
+            //continue;
         }
 
         // Обрабатываем операции с пользователями
