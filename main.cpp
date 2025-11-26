@@ -268,7 +268,7 @@ bool execute_external_command(const std::vector<std::string>& args) {
         
         execvp(exec_args[0], exec_args.data());
         
-        std::cerr << args[0] << ": command not found\n";
+        std::cout << args[0] << ": command not found\n";
         exit(127);
         
     } else if (pid > 0) {
@@ -428,7 +428,7 @@ int main() {
         }
         // Затем как внешнюю команду
         else if (!execute_external_command(args)) {
-            std::cerr << args[0] << ": command not found" << std::endl;
+            std::cout << args[0] << ": command not found" << std::endl;
         }
         
         // Сбрасываем вывод после каждой команды
