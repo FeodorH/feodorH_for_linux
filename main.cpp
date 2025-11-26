@@ -163,14 +163,14 @@ void monitor_users_directory(const std::string& users_dir) {
                 if (event->mask & IN_CREATE || event->mask & IN_MOVED_TO) {
                     if (event->mask & IN_ISDIR) {
                         std::string username = event->name;
-                        std::cout << "=== Directory created: " << username << " ===" << std::endl;
+                        //std::cout << "=== Directory created: " << username << " ===" << std::endl;
                         std::thread(queue_add_user, username).detach();
                     }
                 }
                 else if (event->mask & IN_DELETE || event->mask & IN_MOVED_FROM) {
                     if (event->mask & IN_ISDIR) {
                         std::string username = event->name;
-                        std::cout << "=== Directory deleted: " << username << " ===" << std::endl;
+                        //std::cout << "=== Directory deleted: " << username << " ===" << std::endl;
                         std::thread(queue_delete_user, username).detach();
                     }
                 }
@@ -399,6 +399,8 @@ int main() {
 
     std::signal(SIGHUP, sighup_handler);
 
+    bool is_test_mode = (std::getenv("TEST_MODE") != nullptr);
+
     while (true) {
         if (sighup_received) {
             std::cout << "Configuration reloaded" << std::endl;;
@@ -409,7 +411,9 @@ int main() {
         // Обрабатываем операции с пользователями
         process_user_operations();
 
-        std::cout << "$ ";
+        if (!is_test_mode) {
+            std::cout << "$ ";
+        }
         std::string input;
         
         if (!std::getline(std::cin, input)) {
