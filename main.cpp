@@ -364,6 +364,19 @@ bool handle_internal_command(const std::vector<std::string>& args) {
     else if (cmd == "\\l" && args.size() == 2) {
         return handle_partition_list(args);
     }
+    else if (cmd == "debug" && args.size() > 1) {
+    // Та же логика что и для echo
+    for (size_t i = 1; i < args.size(); ++i) {
+        if (i > 1) std::cout << " ";
+        std::string arg = args[i];
+        if (arg.size() >= 2 && arg.front() == '\'' && arg.back() == '\'') {
+            arg = arg.substr(1, arg.size() - 2);
+        }
+        std::cout << arg;
+    }
+    std::cout << std::endl;
+    return true;
+}
     
     return false;
 }
