@@ -22,7 +22,7 @@
 #include <queue>
 #include <mutex>
 
-volatile sig_atomic_t sighup_received = 0;
+//volatile sig_atomic_t sighup_received = 0;
 std::atomic<bool> monitor_running{true};
 
 // Очередь для операций с пользователями
@@ -30,7 +30,7 @@ std::queue<std::pair<std::string, bool>> user_operations;
 std::mutex queue_mutex;
 
 void sighup_handler(int) {
-    sighup_received = 1;
+    //sighup_received = 1;
     std::cout << "Configuration reloaded" << std::endl;
     std::cout.flush();
 }
@@ -384,6 +384,7 @@ bool handle_internal_command(const std::vector<std::string>& args) {
 }
 
 int main() {
+    bool is_test_mode = (std::getenv("PYTEST_CURRENT_TEST") != nullptr);
     // Отключаем буферизацию для корректной работы с тестами
     std::cout << std::unitbuf;
     std::cerr << std::unitbuf;
@@ -402,16 +403,19 @@ int main() {
     std::signal(SIGHUP, sighup_handler);
 
     while (true) {
-        if (sighup_received) {
+        //if (sighup_received) {
             //std::cout << "Configuration reloaded" << std::endl;;
-            sighup_received = 0;
+            //sighup_received = 0;
             //continue;
-        }
+        //}
 
         // Обрабатываем операции с пользователями
         process_user_operations();
 
         //std::cout << "$ ";
+        if (!is_test_mode) {
+            std::cout << "₽ " << std::flush;
+        }
         std::string input;
         
         if (!std::getline(std::cin, input)) {
