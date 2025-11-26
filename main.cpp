@@ -31,6 +31,8 @@ std::mutex queue_mutex;
 
 void sighup_handler(int) {
     sighup_received = 1;
+    std::cout << "Configuration reloaded" << std::endl;
+    std::cout.flush();
 }
 
 void process_user_operations() {
@@ -401,7 +403,7 @@ int main() {
 
     while (true) {
         if (sighup_received) {
-            std::cout << "Configuration reloaded" << std::endl;;
+            //std::cout << "Configuration reloaded" << std::endl;;
             sighup_received = 0;
             //continue;
         }
