@@ -44,16 +44,16 @@ void process_user_operations() {
         bool is_add = operation.second;
         
         if (is_add) {
-            std::cout << "Processing user creation: " << username << std::endl;
+            //std::cout << "Processing user creation: " << username << std::endl;
             
             // Создаем пользователя с sudo, разрешая "плохие" имена
             std::string command = "sudo adduser --disabled-password --gecos '' --allow-bad-names " + username;
-            std::cout << "Executing: " << command << std::endl;
+            //std::cout << "Executing: " << command << std::endl;
             
             int result = system(command.c_str());
             
             if (result == 0) {
-                std::cout << "User " << username << " created successfully\n";
+                //std::cout << "User " << username << " created successfully\n";
                 
                 // Обновляем информацию в каталоге пользователя
                 std::string users_dir = std::string(getenv("HOME")) + "/users";
@@ -86,16 +86,16 @@ void process_user_operations() {
                 std::cerr << "Error: failed to create user " << username << "\n";
             }
         } else {
-            std::cout << "Processing user deletion: " << username << std::endl;
+            //std::cout << "Processing user deletion: " << username << std::endl;
             
             // Удаляем пользователя с sudo
             std::string command = "sudo userdel -r " + username;
-            std::cout << "Executing: " << command << std::endl;
+            //std::cout << "Executing: " << command << std::endl;
             
             int result = system(command.c_str());
             
             if (result == 0) {
-                std::cout << "User " << username << " deleted successfully\n";
+                //std::cout << "User " << username << " deleted successfully\n";
             } else {
                 std::cerr << "Error: failed to delete user " << username << "\n";
             }
@@ -106,13 +106,13 @@ void process_user_operations() {
 void queue_add_user(const std::string& username) {
     std::lock_guard<std::mutex> lock(queue_mutex);
     user_operations.push({username, true});
-    std::cout << "Queued user creation: " << username << std::endl;
+    //std::cout << "Queued user creation: " << username << std::endl;
 }
 
 void queue_delete_user(const std::string& username) {
     std::lock_guard<std::mutex> lock(queue_mutex);
     user_operations.push({username, false});
-    std::cout << "Queued user deletion: " << username << std::endl;
+    //std::cout << "Queued user deletion: " << username << std::endl;
 }
 
 void monitor_users_directory(const std::string& users_dir) {
@@ -130,7 +130,7 @@ void monitor_users_directory(const std::string& users_dir) {
         return;
     }
     
-    std::cout << "Monitoring directory: " << users_dir << std::endl;
+    //std::cout << "Monitoring directory: " << users_dir << std::endl;
     
     char buffer[4096] __attribute__ ((aligned(__alignof__(struct inotify_event))));
     const struct inotify_event *event;
@@ -194,7 +194,7 @@ void setup_users_vfs() {
             std::cerr << "Error: cannot create users directory " << users_dir << std::endl;
             return;
         }
-        std::cout << "Created users directory: " << users_dir << std::endl;
+        //std::cout << "Created users directory: " << users_dir << std::endl;
     }
     
     // Получаем всех пользователей системы
@@ -417,12 +417,8 @@ int main() {
             break;
         }
 
-        if (input == "\\q") {
+        if (input == "\\q" || input == "exit") {
             break;
-        }
-
-        if (input.empty()) {
-            continue;
         }
 
         // Сохраняем в историю
