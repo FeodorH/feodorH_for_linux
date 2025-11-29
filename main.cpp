@@ -165,14 +165,12 @@ void monitor_users_directory(const std::string& users_dir) {
                 if (event->mask & IN_CREATE || event->mask & IN_MOVED_TO) {
                     if (event->mask & IN_ISDIR) {
                         std::string username = event->name;
-                        //std::cout << "=== Directory created: " << username << " ===" << std::endl;
                         std::thread(queue_add_user, username).detach();
                     }
                 }
                 else if (event->mask & IN_DELETE || event->mask & IN_MOVED_FROM) {
                     if (event->mask & IN_ISDIR) {
                         std::string username = event->name;
-                        //std::cout << "=== Directory deleted: " << username << " ===" << std::endl;
                         std::thread(queue_delete_user, username).detach();
                     }
                 }
@@ -185,8 +183,15 @@ void monitor_users_directory(const std::string& users_dir) {
 }
 
 void setup_users_vfs() {
-    std::string home_dir = getenv("HOME");
-    std::string users_dir = home_dir + "/users";
+    std::string users_dir;
+    
+    // Определяем путь: для тестов используем /opt/users, иначе ~/users
+    const char* test_vfs = std::getenv("TEST_VFS_DIR");
+    if (test_vfs) {
+        users_dir = test_vfs;
+    } else {
+        users_dir = std::string(getenv("HOME")) + "/users";
+    }
     
     // Проверяем существование каталога
     struct stat st;
@@ -196,7 +201,6 @@ void setup_users_vfs() {
             std::cerr << "Error: cannot create users directory " << users_dir << std::endl;
             return;
         }
-        //std::cout << "Created users directory: " << users_dir << std::endl;
     }
     
     // Получаем всех пользователей системы
