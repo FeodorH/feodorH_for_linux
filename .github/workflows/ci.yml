@@ -44,20 +44,24 @@ jobs:
         ls -la *.deb
         file kubsh.deb || echo "No deb file found"
       
-    - name: Run tests in lecturer's container
+    - name: Run tests with sudo setup
       run: |
-        echo "=== Running tests ==="
+        echo "=== Setting up test environment ==="
         docker run --rm \
           -v $PWD:/mnt \
+          --privileged \  # Добавляем привилегии
           tyvik/kubsh_test:master \
           bash -c "
-            set -e
-            echo 'Installing package...' && \
-            cd /mnt && \
-            apt-get update && \
-            apt-get install -y ./kubsh.deb && \
-            echo 'Package installed successfully' && \
-            echo 'Running tests...' && \
-            cd /opt && \
-            pytest -v --log-cli-level=10
+            # Настраиваем sudo без пароля для тестов
+            echo 'root ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
+            echo 'Defaults:root !requiretty' >> /etc/sudoers
+            
+            # Проверяем sudo
+            sudo -n whoami
+            
+            echo '=== Installing package ==='
+            cd /mnt && apt install -y ./kubsh.deb
+            
+            echo '=== Running tests ==='
+            cd /opt && pytest -v --log-cli-level=10
           "
