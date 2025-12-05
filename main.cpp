@@ -177,13 +177,19 @@ void monitor_users_directory(const std::string& users_dir) {
 void setup_users_vfs() {
     // Определяем путь
     const char* test_vfs = std::getenv("TEST_VFS_DIR");
+    const char* home = std::getenv("HOME");
+    
+    std::cout << "[DEBUG] TEST_VFS_DIR: " << (test_vfs ? test_vfs : "NULL") << std::endl;
+    std::cout << "[DEBUG] HOME: " << (home ? home : "NULL") << std::endl;
+    
     if (test_vfs) {
         vfs_users_dir = test_vfs;
     } else {
-        vfs_users_dir = std::string(getenv("HOME")) + "/users";
+        vfs_users_dir = std::string(home ? home : "") + "/users";
     }
     
-    std::cout << "[DEBUG] VFS directory: " << vfs_users_dir << std::endl;
+    std::cout << "[DEBUG] Final VFS directory: " << vfs_users_dir << std::endl;
+    
     
     // Создаем директорию если не существует
     struct stat st;
