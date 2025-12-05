@@ -175,30 +175,18 @@ void monitor_users_directory(const std::string& users_dir) {
 }
 
 void setup_users_vfs() {
-    // Определяем путь
-    const char* test_vfs = std::getenv("TEST_VFS_DIR");
-    const char* home = std::getenv("HOME");
-    
-    std::cout << "[DEBUG] TEST_VFS_DIR: " << (test_vfs ? test_vfs : "NULL") << std::endl;
-    std::cout << "[DEBUG] HOME: " << (home ? home : "NULL") << std::endl;
-    
-    if (test_vfs) {
-        vfs_users_dir = test_vfs;
-    } else {
-        vfs_users_dir = std::string(home ? home : "") + "/users";
-    }
-    
-    std::cout << "[DEBUG] Final VFS directory: " << vfs_users_dir << std::endl;
-    
-    
-    // Создаем директорию если не существует
+    // Всегда проверяем /opt/users в первую очередь
     struct stat st;
-    if (stat(vfs_users_dir.c_str(), &st) == -1) {
-        if (mkdir(vfs_users_dir.c_str(), 0755) == -1) {
-            std::cerr << "Error: cannot create users directory " << vfs_users_dir << std::endl;
-            return;
-        }
-        std::cout << "[DEBUG] Created VFS directory" << std::endl;
+    
+    if (stat("/opt/users", &st) != -1) {
+        // /opt/users существует - используем его
+        vfs_users_dir = "/opt/users";
+        std::cout << "[DEBUG] Using /opt/users (test environment)" << std::endl;
+    } else {
+        // Иначе используем домашнюю директорию
+        const char* home = std::getenv("HOME");
+        vfs_users_dir = std::string(home ? home : "") + "/users";
+        std::cout << "[DEBUG] Using home directory: " << vfs_users_dir << std::endl;
     }
     
     // Читаем /etc/passwd и создаем VFS СИНХРОННО
