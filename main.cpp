@@ -56,38 +56,27 @@ void process_user_operations() {
         bool is_add = operation.second;
         
         if (is_add) {
-            //std::cout << "Processing user creation: " << username << std::endl;
-            
-            // Создаем пользователя с sudo, разрешая "плохие" имена
             std::string command = "sudo adduser --disabled-password --gecos '' --allow-bad-names " + username;
-            //std::cout << "Executing: " << command << std::endl;
-            
             int result = system(command.c_str());
             
             if (result == 0) {
-                //std::cout << "User " << username << " created successfully\n";
-                
-                // Обновляем информацию в каталоге пользователя
-                std::string users_dir = std::string(getenv("HOME")) + "/users";
-                std::string user_dir = users_dir + "/" + username;
+                // Используем глобальный путь VFS
+                std::string user_dir = vfs_users_dir + "/" + username;
                 
                 struct passwd *pwd = getpwnam(username.c_str());
                 if (pwd != nullptr) {
-                    // Создаем файл id
                     std::ofstream id_file(user_dir + "/id");
                     if (id_file.is_open()) {
                         id_file << pwd->pw_uid;
                         id_file.close();
                     }
                     
-                    // Создаем файл home
                     std::ofstream home_file(user_dir + "/home");
                     if (home_file.is_open()) {
                         home_file << pwd->pw_dir;
                         home_file.close();
                     }
                     
-                    // Создаем файл shell
                     std::ofstream shell_file(user_dir + "/shell");
                     if (shell_file.is_open()) {
                         shell_file << (pwd->pw_shell ? pwd->pw_shell : "/bin/sh");
@@ -98,17 +87,10 @@ void process_user_operations() {
                 std::cerr << "Error: failed to create user " << username << "\n";
             }
         } else {
-            //std::cout << "Processing user deletion: " << username << std::endl;
-            
-            // Удаляем пользователя с sudo
             std::string command = "sudo userdel -r " + username;
-            //std::cout << "Executing: " << command << std::endl;
-            
             int result = system(command.c_str());
             
-            if (result == 0) {
-                //std::cout << "User " << username << " deleted successfully\n";
-            } else {
+            if (result != 0) {
                 std::cerr << "Error: failed to delete user " << username << "\n";
             }
         }
@@ -193,6 +175,7 @@ void monitor_users_directory(const std::string& users_dir) {
 }
 
 void setup_users_vfs() {
+    // Определяем путь: для тестов используем /opt/users, иначе ~/users
     const char* test_vfs = std::getenv("TEST_VFS_DIR");
     if (test_vfs) {
         vfs_users_dir = test_vfs;
@@ -202,10 +185,10 @@ void setup_users_vfs() {
     
     // Проверяем существование каталога
     struct stat st;
-    if (stat(users_dir.c_str(), &st) == -1) {
+    if (stat(vfs_users_dir.c_str(), &st) == -1) {
         // Каталог не существует, создаем
-        if (mkdir(users_dir.c_str(), 0755) == -1) {
-            std::cerr << "Error: cannot create users directory " << users_dir << std::endl;
+        if (mkdir(vfs_users_dir.c_str(), 0755) == -1) {
+            std::cerr << "Error: cannot create users directory " << vfs_users_dir << std::endl;
             return;
         }
     }
@@ -218,7 +201,7 @@ void setup_users_vfs() {
         // Пропускаем системных пользователей и пользователей без логина
         if (pwd->pw_uid >= 1000 && pwd->pw_name[0] != '\0') {
             std::string username = pwd->pw_name;
-            std::string user_dir = users_dir + "/" + username;
+            std::string user_dir = vfs_users_dir + "/" + username;
             
             // Создаем каталог пользователя
             if (mkdir(user_dir.c_str(), 0755) == -1 && errno != EEXIST) {
@@ -251,7 +234,7 @@ void setup_users_vfs() {
     endpwent();
     
     // Запускаем мониторинг в отдельном потоке
-    std::thread monitor_thread(monitor_users_directory, users_dir);
+    std::thread monitor_thread(monitor_users_directory, vfs_users_dir);
     monitor_thread.detach();
 }
 
