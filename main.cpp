@@ -22,12 +22,22 @@
 #include <queue>
 #include <mutex>
 
+// struct VFSState {
+//     std::string users_dir;
+//     std::atomic<bool> monitor_running{true};
+//     std::queue<std::pair<std::string, bool>> user_operations;
+//     std::mutex queue_mutex;
+// };
+
 //volatile sig_atomic_t sighup_received = 0;
 std::atomic<bool> monitor_running{true};
 
 // Очередь для операций с пользователями
 std::queue<std::pair<std::string, bool>> user_operations;
 std::mutex queue_mutex;
+
+//VFSState vfs_state;
+std::string vfs_users_dir;
 
 void sighup_handler(int) {
     //sighup_received = 1;
@@ -183,14 +193,11 @@ void monitor_users_directory(const std::string& users_dir) {
 }
 
 void setup_users_vfs() {
-    std::string users_dir;
-    
-    // Определяем путь: для тестов используем /opt/users, иначе ~/users
     const char* test_vfs = std::getenv("TEST_VFS_DIR");
     if (test_vfs) {
-        users_dir = test_vfs;
+        vfs_users_dir = test_vfs;
     } else {
-        users_dir = std::string(getenv("HOME")) + "/users";
+        vfs_users_dir = std::string(getenv("HOME")) + "/users";
     }
     
     // Проверяем существование каталога
