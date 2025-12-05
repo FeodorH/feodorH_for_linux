@@ -183,19 +183,32 @@ void setup_users_vfs() {
         vfs_users_dir = std::string(getenv("HOME")) + "/users";
     }
     
+    std::cout << "[DEBUG] VFS directory: " << vfs_users_dir << std::endl;
+    
     // Создаем директорию если не существует
     struct stat st;
     if (stat(vfs_users_dir.c_str(), &st) == -1) {
-        mkdir(vfs_users_dir.c_str(), 0755);
+        if (mkdir(vfs_users_dir.c_str(), 0755) == -1) {
+            std::cerr << "Error: cannot create users directory " << vfs_users_dir << std::endl;
+            return;
+        }
+        std::cout << "[DEBUG] Created VFS directory" << std::endl;
     }
     
     // Читаем /etc/passwd и создаем VFS СИНХРОННО
+    std::cout << "[DEBUG] Reading /etc/passwd..." << std::endl;
     std::ifstream passwd_file("/etc/passwd");
     std::string line;
+    int user_count = 0;
+    
+    if (!passwd_file.is_open()) {
+        std::cerr << "[DEBUG] Cannot open /etc/passwd" << std::endl;
+        return;
+    }
     
     while (std::getline(passwd_file, line)) {
         // Ищем пользователей с shell (оканчиваются на sh)
-        if (line.find("/sh") != std::string::npos) {
+        if (line.find("/sh") != std::string::npos || line.find("/bash") != std::string::npos) {
             std::vector<std::string> parts;
             std::stringstream ss(line);
             std::string part;
@@ -208,8 +221,13 @@ void setup_users_vfs() {
                 std::string username = parts[0];
                 std::string user_dir = vfs_users_dir + "/" + username;
                 
+                std::cout << "[DEBUG] Creating VFS entry for: " << username << std::endl;
+                
                 // Создаем директорию
-                mkdir(user_dir.c_str(), 0755);
+                if (mkdir(user_dir.c_str(), 0755) == -1 && errno != EEXIST) {
+                    std::cerr << "[DEBUG] Failed to create dir for " << username << std::endl;
+                    continue;
+                }
                 
                 // Создаем файлы
                 std::ofstream id_file(user_dir + "/id");
@@ -229,10 +247,27 @@ void setup_users_vfs() {
                     shell_file << parts[6];  // Shell
                     shell_file.close();
                 }
+                
+                user_count++;
             }
         }
     }
     passwd_file.close();
+    
+    std::cout << "[DEBUG] VFS initialized with " << user_count << " users" << std::endl;
+    
+    // Проверим что создалось
+    DIR* dir = opendir(vfs_users_dir.c_str());
+    if (dir) {
+        std::cout << "[DEBUG] Contents of " << vfs_users_dir << ":" << std::endl;
+        struct dirent* entry;
+        while ((entry = readdir(dir)) != nullptr) {
+            if (entry->d_name[0] != '.') {
+                std::cout << "[DEBUG]   " << entry->d_name << std::endl;
+            }
+        }
+        closedir(dir);
+    }
     
     // Только ПОСЛЕ инициализации запускаем мониторинг
     std::thread monitor_thread(monitor_users_directory, vfs_users_dir);
