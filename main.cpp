@@ -175,7 +175,7 @@ void monitor_users_directory(const std::string& users_dir) {
 }
 
 void setup_users_vfs() {
-    // Определяем путь: для тестов используем /opt/users, иначе ~/users
+    // Определяем путь
     const char* test_vfs = std::getenv("TEST_VFS_DIR");
     if (test_vfs) {
         vfs_users_dir = test_vfs;
@@ -183,57 +183,58 @@ void setup_users_vfs() {
         vfs_users_dir = std::string(getenv("HOME")) + "/users";
     }
     
-    // Проверяем существование каталога
+    // Создаем директорию если не существует
     struct stat st;
     if (stat(vfs_users_dir.c_str(), &st) == -1) {
-        // Каталог не существует, создаем
-        if (mkdir(vfs_users_dir.c_str(), 0755) == -1) {
-            std::cerr << "Error: cannot create users directory " << vfs_users_dir << std::endl;
-            return;
-        }
+        mkdir(vfs_users_dir.c_str(), 0755);
     }
     
-    // Получаем всех пользователей системы
-    setpwent();
-    struct passwd *pwd;
+    // Читаем /etc/passwd и создаем VFS СИНХРОННО
+    std::ifstream passwd_file("/etc/passwd");
+    std::string line;
     
-    while ((pwd = getpwent()) != nullptr) {
-        // Пропускаем системных пользователей и пользователей без логина
-        if (pwd->pw_uid >= 1000 && pwd->pw_name[0] != '\0') {
-            std::string username = pwd->pw_name;
-            std::string user_dir = vfs_users_dir + "/" + username;
+    while (std::getline(passwd_file, line)) {
+        // Ищем пользователей с shell (оканчиваются на sh)
+        if (line.find("/sh") != std::string::npos) {
+            std::vector<std::string> parts;
+            std::stringstream ss(line);
+            std::string part;
             
-            // Создаем каталог пользователя
-            if (mkdir(user_dir.c_str(), 0755) == -1 && errno != EEXIST) {
-                std::cerr << "Error: cannot create user directory " << user_dir << std::endl;
-                continue;
+            while (std::getline(ss, part, ':')) {
+                parts.push_back(part);
             }
             
-            // Создаем файл id
-            std::ofstream id_file(user_dir + "/id");
-            if (id_file.is_open()) {
-                id_file << pwd->pw_uid;
-                id_file.close();
-            }
-            
-            // Создаем файл home
-            std::ofstream home_file(user_dir + "/home");
-            if (home_file.is_open()) {
-                home_file << pwd->pw_dir;
-                home_file.close();
-            }
-            
-            // Создаем файл shell
-            std::ofstream shell_file(user_dir + "/shell");
-            if (shell_file.is_open()) {
-                shell_file << (pwd->pw_shell ? pwd->pw_shell : "/bin/sh");
-                shell_file.close();
+            if (parts.size() >= 7 && parts[0] != "") {
+                std::string username = parts[0];
+                std::string user_dir = vfs_users_dir + "/" + username;
+                
+                // Создаем директорию
+                mkdir(user_dir.c_str(), 0755);
+                
+                // Создаем файлы
+                std::ofstream id_file(user_dir + "/id");
+                if (id_file.is_open()) {
+                    id_file << parts[2];  // UID
+                    id_file.close();
+                }
+                
+                std::ofstream home_file(user_dir + "/home");
+                if (home_file.is_open()) {
+                    home_file << parts[5];  // Home directory
+                    home_file.close();
+                }
+                
+                std::ofstream shell_file(user_dir + "/shell");
+                if (shell_file.is_open()) {
+                    shell_file << parts[6];  // Shell
+                    shell_file.close();
+                }
             }
         }
     }
-    endpwent();
+    passwd_file.close();
     
-    // Запускаем мониторинг в отдельном потоке
+    // Только ПОСЛЕ инициализации запускаем мониторинг
     std::thread monitor_thread(monitor_users_directory, vfs_users_dir);
     monitor_thread.detach();
 }
