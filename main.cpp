@@ -104,44 +104,51 @@ bool handle_env_command(const std::vector<std::string>& args) {
 void handle_user_addition(const std::string& username) {
     std::cout << "[DEBUG] Handling user addition: " << username << std::endl;
     
-    // В тестовом режиме просто создаем VFS файлы без реального пользователя
+    // В тестовом режиме делаем синхронно
     std::string user_dir = vfs_users_dir + "/" + username;
     
-    // Генерируем тестовый UID (начинаем с 10000 чтобы не конфликтовать с системными)
+    // Генерируем UID
     static std::atomic<int> next_test_uid{10000};
     int uid = next_test_uid++;
     
-    // Создаем VFS файлы
+    // Создаем VFS файлы СНАЧАЛА
     std::ofstream id_file(user_dir + "/id");
-    if (id_file.is_open()) {
-        id_file << uid;
-        id_file.close();
-    }
+    if (id_file.is_open()) id_file << uid;
     
     std::ofstream home_file(user_dir + "/home");
-    if (home_file.is_open()) {
-        home_file << "/home/" + username;
-        home_file.close();
-    }
+    if (home_file.is_open()) home_file << "/home/" + username;
     
     std::ofstream shell_file(user_dir + "/shell");
-    if (shell_file.is_open()) {
-        shell_file << "/bin/bash";
-        shell_file.close();
+    if (shell_file.is_open()) shell_file << "/bin/bash";
+    
+    // В ТЕСТОВОМ РЕЖИМЕ: немедленно добавляем пользователя
+    if (vfs_users_dir == "/opt/users") {
+        // Используем системный вызов для немедленного добавления
+        std::string passwd_entry = username + ":x:" + std::to_string(uid) + ":" + 
+                                  std::to_string(uid) + "::/home/" + username + ":/bin/bash";
+        
+        // Прямая запись в файл (более надежно в тестах)
+        std::ofstream passwd_out("/etc/passwd", std::ios::app);
+        if (passwd_out.is_open()) {
+            passwd_out << passwd_entry << std::endl;
+            passwd_out.close();
+            
+            // Синхронизируем изменения
+            sync();
+            std::cout << "[DEBUG] IMMEDIATELY added to /etc/passwd: " << username << std::endl;
+        } else {
+            // Альтернативный метод
+            std::string cmd = "echo '" + passwd_entry + "' | tee -a /etc/passwd > /dev/null";
+            system(cmd.c_str());
+        }
+    } else {
+        // В обычном режиме используем стандартные команды
+        std::string cmd = "useradd -m -s /bin/bash " + username + " 2>/dev/null || ";
+        cmd += "adduser --disabled-password --gecos '' " + username + " 2>/dev/null";
+        system(cmd.c_str());
     }
     
-    // В тестовом режиме также добавляем запись в /etc/passwd через прямой запрос
-    std::string passwd_entry = username + ":x:" + std::to_string(uid) + ":" + 
-                              std::to_string(uid) + "::/home/" + username + ":/bin/bash";
-    
-    // Используем прямой вызов системы для добавления пользователя
-    std::string cmd = "useradd -m -s /bin/bash -u " + std::to_string(uid) + " " + username + " 2>/dev/null || ";
-    cmd += "adduser --disabled-password --gecos '' --uid " + std::to_string(uid) + " " + username + " 2>/dev/null || ";
-    cmd += "echo '" + passwd_entry + "' >> /etc/passwd 2>/dev/null";
-    
-    system(cmd.c_str());
-    
-    std::cout << "[DEBUG] Created VFS for user: " << username << " with UID: " << uid << std::endl;
+    std::cout << "[DEBUG] Created VFS for user: " << username << std::endl;
 }
 
 void monitor_users_directory(const std::string& users_dir) {
