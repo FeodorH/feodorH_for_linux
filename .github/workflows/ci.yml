@@ -51,9 +51,15 @@ jobs:
           -v $PWD:/mnt \
           --privileged \
           --user root \
+          --cap-add=SYS_ADMIN \
           tyvik/kubsh_test:master \
           bash -c "
-            # Теперь мы root, sudo не нужен
+            # Устанавливаем необходимые утилиты
+            apt-get update && apt-get install -y sudo adduser
+            
+            # Настраиваем sudo без пароля для root
+            echo 'root ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
+            
             echo '=== Installing package ==='
             cd /mnt && apt install -y ./kubsh.deb
             
