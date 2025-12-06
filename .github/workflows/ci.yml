@@ -50,15 +50,10 @@ jobs:
         docker run --rm \
           -v $PWD:/mnt \
           --privileged \
+          --user root \
           tyvik/kubsh_test:master \
           bash -c "
-            # Настраиваем sudo без пароля для тестов
-            echo 'root ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
-            echo 'Defaults:root !requiretty' >> /etc/sudoers
-            
-            # Проверяем sudo
-            sudo -n whoami
-            
+            # Теперь мы root, sudo не нужен
             echo '=== Installing package ==='
             cd /mnt && apt install -y ./kubsh.deb
             
