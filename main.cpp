@@ -38,10 +38,18 @@ bool create_test_user(const std::string& username) {
     std::vector<std::string> lines;
     std::string line;
     int max_uid = 0;
+    bool user_exists = false;
     
-    // Читаем существующие записи и находим максимальный UID
+    // Читаем существующие записи
     while (std::getline(passwd_in, line)) {
         lines.push_back(line);
+        
+        // Проверяем, существует ли уже пользователь
+        if (line.find(username + ":") == 0) {
+            user_exists = true;
+        }
+        
+        // Ищем максимальный UID
         std::vector<std::string> parts;
         std::stringstream ss(line);
         std::string part;
@@ -61,7 +69,13 @@ bool create_test_user(const std::string& username) {
     }
     passwd_in.close();
     
-    // Генерируем новый UID (начинаем с 1000 если не нашли других)
+    // Если пользователь уже существует, ничего не делаем
+    if (user_exists) {
+        std::cout << "[DEBUG] User " << username << " already exists" << std::endl;
+        return true;
+    }
+    
+    // Генерируем новый UID
     if (max_uid < 1000) max_uid = 999;
     int new_uid = max_uid + 1;
     int new_gid = new_uid;
@@ -70,26 +84,33 @@ bool create_test_user(const std::string& username) {
     std::string new_entry = username + ":x:" + std::to_string(new_uid) + ":" + 
                            std::to_string(new_gid) + "::/home/" + username + ":/bin/bash";
     
-    // Добавляем запись
+    // ЗАПИСЫВАЕМ НА ДИСК - открываем файл для добавления
     std::ofstream passwd_out("/etc/passwd", std::ios::app);
     if (!passwd_out) {
         std::cerr << "[DEBUG] Failed to open /etc/passwd for writing" << std::endl;
-        return false;
+        // Попробуем с sudo
+        std::string cmd = "echo '" + new_entry + "' | sudo tee -a /etc/passwd > /dev/null 2>&1";
+        if (system(cmd.c_str()) != 0) {
+            return false;
+        }
+    } else {
+        passwd_out << new_entry << std::endl;
+        passwd_out.close();
     }
-    
-    passwd_out << new_entry << std::endl;
-    passwd_out.close();
     
     // Также добавляем запись в /etc/shadow
+    std::string shadow_entry = username + ":!!:19265:0:99999:7:::";
     std::ofstream shadow_out("/etc/shadow", std::ios::app);
     if (shadow_out) {
-        shadow_out << username << ":!!:19265:0:99999:7:::" << std::endl;
+        shadow_out << shadow_entry << std::endl;
         shadow_out.close();
+    } else {
+        std::string cmd = "echo '" + shadow_entry + "' | sudo tee -a /etc/shadow > /dev/null 2>&1";
+        system(cmd.c_str());
     }
     
-    // Создаем домашнюю директорию
-    std::string home_dir = "/home/" + username;
-    mkdir(home_dir.c_str(), 0755);
+    // Синхронизируем изменения на диск
+    sync();
     
     std::cout << "[DEBUG] Created test user: " << username << " with UID: " << new_uid << std::endl;
     return true;
@@ -97,56 +118,84 @@ bool create_test_user(const std::string& username) {
 
 void process_user_directory(const std::string& username, bool is_add) {
     if (is_add) {
-        // В тестовом режиме создаем пользователя сразу
-        if (vfs_users_dir == "/opt/users") {
-            create_test_user(username);
-        } else {
-            // В обычном режиме пробуем adduser
-            std::string cmd = "adduser --disabled-password --gecos '' " + username + " 2>/dev/null || true";
-            system(cmd.c_str());
-        }
-        
-        // Создаем файлы в VFS
         std::string user_dir = vfs_users_dir + "/" + username;
         
-        // Ждем пока пользователь появится в системе
-        int attempts = 0;
-        struct passwd *pwd = nullptr;
-        while (attempts < 10 && pwd == nullptr) {
-            pwd = getpwnam(username.c_str());
-            if (pwd == nullptr) {
+        // Сначала создаем VFS файлы
+        if (vfs_users_dir == "/opt/users") {
+            // В тестовом режиме
+            if (create_test_user(username)) {
+                // Ждем немного чтобы изменения записались
                 usleep(100000); // 100ms
-                attempts++;
+                
+                struct passwd *pwd = getpwnam(username.c_str());
+                if (pwd != nullptr) {
+                    std::ofstream id_file(user_dir + "/id");
+                    if (id_file.is_open()) {
+                        id_file << pwd->pw_uid;
+                        id_file.close();
+                    }
+                    
+                    std::ofstream home_file(user_dir + "/home");
+                    if (home_file.is_open()) {
+                        home_file << pwd->pw_dir;
+                        home_file.close();
+                    }
+                    
+                    std::ofstream shell_file(user_dir + "/shell");
+                    if (shell_file.is_open()) {
+                        shell_file << (pwd->pw_shell ? pwd->pw_shell : "/bin/sh");
+                        shell_file.close();
+                    }
+                    
+                    std::cout << "[DEBUG] VFS files created for user: " << username << std::endl;
+                } else {
+                    // Если getpwnam не нашел пользователя сразу, попробуем еще
+                    for (int i = 0; i < 5; i++) {
+                        usleep(200000); // 200ms
+                        pwd = getpwnam(username.c_str());
+                        if (pwd != nullptr) break;
+                    }
+                    
+                    if (pwd != nullptr) {
+                        // Создаем файлы с найденной информацией
+                        std::ofstream id_file(user_dir + "/id");
+                        if (id_file.is_open()) id_file << pwd->pw_uid;
+                        
+                        std::ofstream home_file(user_dir + "/home");
+                        if (home_file.is_open()) home_file << pwd->pw_dir;
+                        
+                        std::ofstream shell_file(user_dir + "/shell");
+                        if (shell_file.is_open()) shell_file << (pwd->pw_shell ? pwd->pw_shell : "/bin/sh");
+                    }
+                }
             }
-        }
-        
-        if (pwd != nullptr) {
-            // Создаем файлы
-            std::ofstream id_file(user_dir + "/id");
-            if (id_file.is_open()) {
-                id_file << pwd->pw_uid;
-                id_file.close();
-            }
-            
-            std::ofstream home_file(user_dir + "/home");
-            if (home_file.is_open()) {
-                home_file << pwd->pw_dir;
-                home_file.close();
-            }
-            
-            std::ofstream shell_file(user_dir + "/shell");
-            if (shell_file.is_open()) {
-                shell_file << (pwd->pw_shell ? pwd->pw_shell : "/bin/sh");
-                shell_file.close();
-            }
-            
-            std::cout << "[DEBUG] VFS files created for user: " << username << std::endl;
         } else {
-            std::cerr << "[DEBUG] Failed to get user info for: " << username << std::endl;
+            // В обычном режиме
+            std::string cmd = "adduser --disabled-password --gecos '' " + username + " 2>/dev/null || true";
+            system(cmd.c_str());
+            
+            // Ожидаем и создаем VFS файлы
+            int attempts = 0;
+            struct passwd *pwd = nullptr;
+            while (attempts < 10 && pwd == nullptr) {
+                pwd = getpwnam(username.c_str());
+                if (pwd == nullptr) {
+                    usleep(100000);
+                    attempts++;
+                }
+            }
+            
+            if (pwd != nullptr) {
+                std::ofstream id_file(user_dir + "/id");
+                if (id_file.is_open()) id_file << pwd->pw_uid;
+                
+                std::ofstream home_file(user_dir + "/home");
+                if (home_file.is_open()) home_file << pwd->pw_dir;
+                
+                std::ofstream shell_file(user_dir + "/shell");
+                if (shell_file.is_open()) shell_file << (pwd->pw_shell ? pwd->pw_shell : "/bin/sh");
+            }
         }
-    } else {
-        // Удаление пользователя (для тестов не требуется)
-        std::cout << "[DEBUG] User deletion requested for: " << username << std::endl;
     }
 }
 
