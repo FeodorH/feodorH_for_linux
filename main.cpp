@@ -214,7 +214,7 @@ void monitor_users_directory(const std::string& users_dir) {
                 if (event->mask & IN_CREATE || event->mask & IN_MOVED_TO) {
                     if (event->mask & IN_ISDIR) {
                         // Создаем пользователя в отдельном потоке
-                        std::thread(handle_user_addition, username).detach();
+                        handle_user_addition(username);
                     }
                 }
                 else if (event->mask & IN_DELETE || event->mask & IN_MOVED_FROM) {
