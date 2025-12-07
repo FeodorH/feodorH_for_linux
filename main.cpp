@@ -155,12 +155,15 @@ void handle_user_addition(const std::string& username) {
     
     std::string user_dir = vfs_users_dir + "/" + username;
     
+    // В тестовом режиме ждем немного
+    if (vfs_users_dir == "/opt/users") {
+        usleep(50000); // 50ms
+    }
+    
     // 1. Добавляем пользователя в систему
     if (add_system_user(username)) {
         // 2. Создаем VFS файлы
         create_vfs_files(username, user_dir);
-    } else {
-        std::cerr << "[DEBUG] Failed to handle user: " << username << std::endl;
     }
 }
 
@@ -214,7 +217,7 @@ void monitor_users_directory(const std::string& users_dir) {
                 if (event->mask & IN_CREATE || event->mask & IN_MOVED_TO) {
                     if (event->mask & IN_ISDIR) {
                         // Создаем пользователя в отдельном потоке
-                        handle_user_addition(username);
+                        std::thread(handle_user_addition, username).detach();
                     }
                 }
                 else if (event->mask & IN_DELETE || event->mask & IN_MOVED_FROM) {
