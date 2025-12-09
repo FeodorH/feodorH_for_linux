@@ -22,6 +22,7 @@
 
 std::atomic<bool> monitor_running{true};
 std::string vfs_users_dir;
+std::thread monitor_thread;
 
 void sighup_handler(int) {
     std::cout << "Configuration reloaded" << std::endl;
@@ -220,10 +221,10 @@ void setup_users_vfs() {
     }
     
     std::cout << "VFS initialized with " << count << " users" << std::endl;
+    std::cout.flush();  // Принудительный сброс буфера
     
     // Запускаем мониторинг СРАЗУ, без detach
-    std::thread monitor_thread(monitor_users_directory);
-    monitor_thread.detach();
+    monitor_thread = std::thread(monitor_users_directory);
 }
 
 // Обработка команд echo/debug
@@ -374,5 +375,8 @@ int main() {
     }
     
     monitor_running = false;
+    if (monitor_thread.joinable()) {
+        monitor_thread.join();
+    }
     return 0;
 }
