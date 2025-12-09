@@ -307,6 +307,9 @@ int main() {
     
     // Инициализация VFS
     setup_users_vfs();
+    if (vfs_users_dir == "/opt/users") {
+        usleep(100000); // 100ms
+    }
     
     // Обработчик сигналов
     signal(SIGHUP, sighup_handler);
