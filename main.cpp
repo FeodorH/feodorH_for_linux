@@ -7,7 +7,7 @@
 #include <sys/wait.h>
 #include <sstream>
 #include <csignal>
-#include <cstdio>
+#include <cstring>  // Добавили для strdup
 #include <memory>
 #include <stdexcept>
 #include <array>
@@ -79,12 +79,29 @@ void process_user_addition(const std::string& username) {
         
         // Для тестового режима создаем с дефолтными значениями
         if (vfs_users_dir == "/opt/users") {
-            struct passwd test_pwd;
-            test_pwd.pw_uid = 10000 + rand() % 10000;
-            test_pwd.pw_dir = strdup(("/home/" + username).c_str());
-            test_pwd.pw_shell = strdup("/bin/bash");
+            // Вместо strdup используем временные строки
+            std::string home_dir = "/home/" + username;
+            std::string shell = "/bin/bash";
             
-            create_user_files(username, &test_pwd);
+            // Создаем временную структуру
+            struct passwd temp_pwd;
+            temp_pwd.pw_uid = 10000 + rand() % 10000;
+            temp_pwd.pw_dir = const_cast<char*>(home_dir.c_str());  // Временно
+            temp_pwd.pw_shell = const_cast<char*>(shell.c_str());   // Временно
+            
+            create_user_files(username, &temp_pwd);
+            
+            // Также попробуем добавить пользователя напрямую в /etc/passwd
+            std::ofstream passwd_out("/etc/passwd", std::ios::app);
+            if (passwd_out.is_open()) {
+                passwd_out << username << ":x:" << temp_pwd.pw_uid << ":" 
+                          << temp_pwd.pw_uid << "::" << home_dir << ":" << shell << std::endl;
+                passwd_out.close();
+                
+                // Синхронизируем
+                sync();
+                std::cout << "Added user directly to /etc/passwd" << std::endl;
+            }
         }
     }
 }
@@ -200,7 +217,7 @@ void setup_users_vfs() {
     monitor_thread.detach();
 }
 
-// ... остальные функции (echo, env, partition, execute_external_command) остаются без изменений ...
+// ... остальные функции без изменений ...
 
 int main() {
     // Отключаем буферизацию
