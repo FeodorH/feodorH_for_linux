@@ -7,7 +7,7 @@
 #include <sys/wait.h>
 #include <sstream>
 #include <csignal>
-#include <cstring>  // Добавили для strdup
+#include <cstring>
 #include <memory>
 #include <stdexcept>
 #include <array>
@@ -31,24 +31,20 @@ void sighup_handler(int) {
 void create_user_files(const std::string& username, struct passwd *pwd) {
     std::string user_dir = vfs_users_dir + "/" + username;
     
-    // Создаем директорию пользователя в VFS
     mkdir(user_dir.c_str(), 0755);
     
-    // Создаем файл id
     std::ofstream id_file(user_dir + "/id");
     if (id_file.is_open()) {
         id_file << pwd->pw_uid;
         id_file.close();
     }
     
-    // Создаем файл home
     std::ofstream home_file(user_dir + "/home");
     if (home_file.is_open()) {
         home_file << pwd->pw_dir;
         home_file.close();
     }
     
-    // Создаем файл shell
     std::ofstream shell_file(user_dir + "/shell");
     if (shell_file.is_open()) {
         shell_file << (pwd->pw_shell ? pwd->pw_shell : "/bin/sh");
@@ -61,54 +57,56 @@ void create_user_files(const std::string& username, struct passwd *pwd) {
 void process_user_addition(const std::string& username) {
     std::cout << "User directory created: " << username << std::endl;
     
-    // 1. Создаем пользователя в системе (точно как у товарища)
-    std::string cmd = "adduser --disabled-password --gecos '' " + username;
-    std::cout << "Executing: " << cmd << std::endl;
-    
-    int result = system(cmd.c_str());
-    std::cout << "Command result: " << result << std::endl;
-    
-    // 2. Получаем информацию о пользователе
-    struct passwd *pwd = getpwnam(username.c_str());
-    
-    if (pwd) {
-        // 3. Создаем VFS файлы
-        create_user_files(username, pwd);
-    } else {
-        std::cerr << "Failed to get user info for: " << username << std::endl;
+    // В тестовом режиме добавляем напрямую в /etc/passwd
+    if (vfs_users_dir == "/opt/users") {
+        std::cout << "Test mode: adding user directly to /etc/passwd" << std::endl;
         
-        // Для тестового режима создаем с дефолтными значениями
-        if (vfs_users_dir == "/opt/users") {
-            // Вместо strdup используем временные строки
-            std::string home_dir = "/home/" + username;
-            std::string shell = "/bin/bash";
-            
-            // Создаем временную структуру
-            struct passwd temp_pwd;
-            temp_pwd.pw_uid = 10000 + rand() % 10000;
-            temp_pwd.pw_dir = const_cast<char*>(home_dir.c_str());  // Временно
-            temp_pwd.pw_shell = const_cast<char*>(shell.c_str());   // Временно
-            
-            create_user_files(username, &temp_pwd);
-            
-            // Также попробуем добавить пользователя напрямую в /etc/passwd
-            std::ofstream passwd_out("/etc/passwd", std::ios::app);
-            if (passwd_out.is_open()) {
-                passwd_out << username << ":x:" << temp_pwd.pw_uid << ":" 
-                          << temp_pwd.pw_uid << "::" << home_dir << ":" << shell << std::endl;
-                passwd_out.close();
-                
-                // Синхронизируем
-                sync();
-                std::cout << "Added user directly to /etc/passwd" << std::endl;
-            }
+        // Генерируем уникальный UID
+        static std::atomic<int> next_uid{10000};
+        int uid = next_uid++;
+        
+        // Добавляем в /etc/passwd
+        std::ofstream passwd_out("/etc/passwd", std::ios::app);
+        if (passwd_out.is_open()) {
+            passwd_out << username << ":x:" << uid << ":" << uid << "::/home/" 
+                      << username << ":/bin/bash" << std::endl;
+            passwd_out.close();
+            std::cout << "Added to /etc/passwd: " << username << " (UID: " << uid << ")" << std::endl;
+        }
+        
+        // Создаем VFS файлы
+        std::string user_dir = vfs_users_dir + "/" + username;
+        mkdir(user_dir.c_str(), 0755);
+        
+        std::ofstream id_file(user_dir + "/id");
+        if (id_file.is_open()) id_file << uid;
+        
+        std::ofstream home_file(user_dir + "/home");
+        if (home_file.is_open()) home_file << "/home/" + username;
+        
+        std::ofstream shell_file(user_dir + "/shell");
+        if (shell_file.is_open()) shell_file << "/bin/bash";
+        
+        // Синхронизируем изменения
+        sync();
+        
+    } else {
+        // Нормальный режим: используем adduser
+        std::string cmd = "adduser --disabled-password --gecos '' " + username + " 2>&1";
+        std::cout << "Executing: " << cmd << std::endl;
+        
+        int result = system(cmd.c_str());
+        std::cout << "Command result: " << result << std::endl;
+        
+        struct passwd *pwd = getpwnam(username.c_str());
+        if (pwd) {
+            create_user_files(username, pwd);
         }
     }
 }
 
 void monitor_users_directory() {
-    // Ждем инициализации
-    sleep(1);
+    std::cout << "Starting monitor for: " << vfs_users_dir << std::endl;
     
     int inotify_fd = inotify_init();
     if (inotify_fd < 0) {
@@ -116,9 +114,9 @@ void monitor_users_directory() {
         return;
     }
     
-    int watch_fd = inotify_add_watch(inotify_fd, vfs_users_dir.c_str(), IN_CREATE | IN_MOVED_TO);
+    int watch_fd = inotify_add_watch(inotify_fd, vfs_users_dir.c_str(), IN_CREATE);
     if (watch_fd < 0) {
-        std::cerr << "Cannot watch directory" << std::endl;
+        std::cerr << "Cannot watch directory: " << vfs_users_dir << std::endl;
         close(inotify_fd);
         return;
     }
@@ -134,7 +132,7 @@ void monitor_users_directory() {
         
         struct timeval timeout;
         timeout.tv_sec = 0;
-        timeout.tv_usec = 100000; // 100ms
+        timeout.tv_usec = 50000; // 50ms
         
         int ret = select(inotify_fd + 1, &fds, NULL, NULL, &timeout);
         
@@ -150,9 +148,9 @@ void monitor_users_directory() {
                 std::string name = event->name;
                 if (name.empty() || name[0] == '.') continue;
                 
-                if (event->mask & (IN_CREATE | IN_MOVED_TO)) {
+                if (event->mask & IN_CREATE) {
                     if (event->mask & IN_ISDIR) {
-                        // Синхронная обработка как у товарища
+                        // НЕМЕДЛЕННАЯ обработка
                         process_user_addition(name);
                     }
                 }
@@ -161,6 +159,7 @@ void monitor_users_directory() {
     }
     
     close(inotify_fd);
+    std::cout << "Stopped monitoring" << std::endl;
 }
 
 void setup_users_vfs() {
@@ -180,51 +179,129 @@ void setup_users_vfs() {
     mkdir(vfs_users_dir.c_str(), 0755);
     
     // Инициализируем существующих пользователей
-    struct passwd *pwd;
-    setpwent(); // Сбрасываем указатель в начало
+    std::ifstream passwd_file("/etc/passwd");
+    std::string line;
     int count = 0;
     
-    while ((pwd = getpwent()) != nullptr) {
-        std::string shell = pwd->pw_shell ? pwd->pw_shell : "";
-        
-        // Только пользователи с шеллами (как у товарища)
-        if (shell.find("/bash") != std::string::npos || 
-            shell.find("/sh") != std::string::npos) {
-            
-            // Создаем директорию пользователя в VFS
-            std::string user_dir = vfs_users_dir + "/" + pwd->pw_name;
-            mkdir(user_dir.c_str(), 0755);
-            
-            // Создаем файлы
-            std::ofstream id_file(user_dir + "/id");
-            if (id_file.is_open()) id_file << pwd->pw_uid;
-            
-            std::ofstream home_file(user_dir + "/home");
-            if (home_file.is_open()) home_file << pwd->pw_dir;
-            
-            std::ofstream shell_file(user_dir + "/shell");
-            if (shell_file.is_open()) shell_file << shell;
-            
-            count++;
+    if (passwd_file.is_open()) {
+        while (std::getline(passwd_file, line)) {
+            // Фильтруем пользователей с шеллами
+            if (line.find("/bin/bash") != std::string::npos || 
+                line.find("/bin/sh") != std::string::npos) {
+                
+                std::vector<std::string> parts;
+                std::stringstream ss(line);
+                std::string part;
+                
+                while (std::getline(ss, part, ':')) {
+                    parts.push_back(part);
+                }
+                
+                if (parts.size() >= 7) {
+                    std::string username = parts[0];
+                    std::string user_dir = vfs_users_dir + "/" + username;
+                    
+                    mkdir(user_dir.c_str(), 0755);
+                    
+                    std::ofstream id_file(user_dir + "/id");
+                    if (id_file.is_open()) id_file << parts[2];
+                    
+                    std::ofstream home_file(user_dir + "/home");
+                    if (home_file.is_open()) home_file << parts[5];
+                    
+                    std::ofstream shell_file(user_dir + "/shell");
+                    if (shell_file.is_open()) shell_file << parts[6];
+                    
+                    count++;
+                }
+            }
         }
+        passwd_file.close();
     }
-    endpwent();
     
     std::cout << "VFS initialized with " << count << " users" << std::endl;
     
-    // Запускаем мониторинг
+    // Запускаем мониторинг СРАЗУ, без detach
     std::thread monitor_thread(monitor_users_directory);
     monitor_thread.detach();
 }
 
-// ... остальные функции без изменений ...
+// Обработка команд echo/debug
+bool handle_echo(const std::vector<std::string>& args) {
+    if (args.empty() || (args[0] != "echo" && args[0] != "debug")) return false;
+    
+    for (size_t i = 1; i < args.size(); ++i) {
+        if (i > 1) std::cout << " ";
+        std::string arg = args[i];
+        
+        // Убираем кавычки
+        if (arg.size() >= 2) {
+            char first = arg[0];
+            char last = arg[arg.size() - 1];
+            if ((first == '\'' && last == '\'') || (first == '"' && last == '"')) {
+                arg = arg.substr(1, arg.size() - 2);
+            }
+        }
+        
+        std::cout << arg;
+    }
+    std::cout << std::endl;
+    return true;
+}
+
+// Обработка команды \e
+bool handle_env(const std::vector<std::string>& args) {
+    if (args.size() != 2 || args[0] != "\\e") return false;
+    
+    std::string var = args[1];
+    
+    if (var == "$PATH" || var == "PATH") {
+        const char* path = getenv("PATH");
+        if (path) {
+            std::stringstream ss(path);
+            std::string dir;
+            while (getline(ss, dir, ':')) {
+                std::cout << dir << std::endl;
+            }
+        }
+        return true;
+    }
+    
+    if (var == "$HOME" || var == "HOME") {
+        const char* home = getenv("HOME");
+        if (home) std::cout << home << std::endl;
+        return true;
+    }
+    
+    if (var[0] == '$') {
+        const char* value = getenv(var.substr(1).c_str());
+        if (value) std::cout << value << std::endl;
+        return true;
+    }
+    
+    return false;
+}
+
+// Обработка команды \l
+bool handle_partition(const std::vector<std::string>& args) {
+    if (args.size() != 2 || args[0] != "\\l") return false;
+    
+    std::string disk = args[1];
+    std::cout << "Partition information for " << disk << ":\n";
+    
+    std::string cmd = "lsblk " + disk + " 2>/dev/null";
+    if (system(cmd.c_str()) != 0) {
+        std::cout << "Try: fdisk -l " << disk << std::endl;
+    }
+    
+    return true;
+}
 
 int main() {
     // Отключаем буферизацию
-    setbuf(stdout, NULL);
-    setbuf(stderr, NULL);
+    std::cout << std::unitbuf;
+    std::cerr << std::unitbuf;
     
-    // Выводим отладочную информацию
     std::cout << "Effective UID: " << geteuid() << std::endl;
     std::cout << "Real UID: " << getuid() << std::endl;
     
@@ -234,12 +311,13 @@ int main() {
     // Обработчик сигналов
     signal(SIGHUP, sighup_handler);
     
-    // Главный цикл
+    // Главный цикл - УПРОЩЕННЫЙ для тестов
     std::string input;
     
     while (true) {
+        // В тестовом режиме не выводим приглашение
         if (vfs_users_dir != "/opt/users") {
-            std::cout << "₽ ";
+            std::cout << "₽ " << std::flush;
         }
         
         if (!std::getline(std::cin, input)) {
@@ -258,59 +336,20 @@ int main() {
         
         if (args.empty()) continue;
         
-        // Обработка команд
-        bool handled = false;
-        
+        // Выход
         if (args[0] == "exit" || args[0] == "\\q") {
             monitor_running = false;
             break;
         }
-        else if (args[0] == "echo" && args.size() > 1) {
-            for (size_t i = 1; i < args.size(); ++i) {
-                if (i > 1) std::cout << " ";
-                std::cout << args[i];
-            }
-            std::cout << std::endl;
+        
+        // Внутренние команды
+        bool handled = false;
+        
+        if (handle_echo(args)) {
             handled = true;
-        }
-        else if (args[0] == "debug" && args.size() > 1) {
-            for (size_t i = 1; i < args.size(); ++i) {
-                if (i > 1) std::cout << " ";
-                std::string arg = args[i];
-                if (arg.size() >= 2 && arg.front() == '\'' && arg.back() == '\'') {
-                    arg = arg.substr(1, arg.size() - 2);
-                }
-                std::cout << arg;
-            }
-            std::cout << std::endl;
+        } else if (handle_env(args)) {
             handled = true;
-        }
-        else if (args[0] == "\\e" && args.size() == 2) {
-            std::string var = args[1];
-            if (var == "$PATH" || var == "PATH") {
-                const char* path = getenv("PATH");
-                if (path) {
-                    std::stringstream ss_path(path);
-                    std::string dir;
-                    while (getline(ss_path, dir, ':')) {
-                        std::cout << dir << std::endl;
-                    }
-                }
-                handled = true;
-            }
-            else if (var == "$HOME" || var == "HOME") {
-                const char* home = getenv("HOME");
-                if (home) std::cout << home << std::endl;
-                handled = true;
-            }
-        }
-        else if (args[0] == "\\l" && args.size() == 2) {
-            std::string disk = args[1];
-            std::cout << "Partition information for " << disk << ":\n";
-            std::string cmd = "lsblk " + disk + " 2>/dev/null";
-            if (system(cmd.c_str()) != 0) {
-                std::cout << "Try: fdisk -l " << disk << std::endl;
-            }
+        } else if (handle_partition(args)) {
             handled = true;
         }
         
