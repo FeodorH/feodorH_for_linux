@@ -298,9 +298,8 @@ bool handle_partition(const std::vector<std::string>& args) {
 }
 
 int main() {
-    // Отключаем буферизацию
-    std::cout << std::unitbuf;
-    std::cerr << std::unitbuf;
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
     
     std::cout << "Effective UID: " << geteuid() << std::endl;
     std::cout << "Real UID: " << getuid() << std::endl;
