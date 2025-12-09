@@ -1,8 +1,3 @@
-CXX = g++
-CXXFLAGS = -std=c++17 -Wall -Wextra -pedantic -pthread
-TARGET = kubsh
-SRC = main.cpp
-
 all: build package
 
 build:
