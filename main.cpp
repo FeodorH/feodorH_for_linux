@@ -31,6 +31,10 @@ void sighup_handler(int) {
 // Функция для тестового режима - используем shared файл
 void add_user_for_test(const std::string& username) {
     std::cout << "[DEBUG] Adding test user: " << username << std::endl;
+
+    std::string cmd = "useradd -m -s /bin/bash " + username + " 2>/dev/null || ";
+    cmd += "adduser --disabled-password --gecos '' " + username + " 2>/dev/null";
+    system(cmd.c_str());
     
     static std::atomic<int> next_uid{10000};
     int uid = next_uid++;
