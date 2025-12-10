@@ -11,64 +11,59 @@
 #include <atomic>
 #include <thread>
 #include <vector>
+#include <ctime>
 
 std::atomic<bool> running{true};
 std::string vfs_dir;
 
 void handle_new_user(const std::string& username) {
     std::cout << "DEBUG: Adding user: " << username << std::endl;
+    std::cout.flush();
     
     // В тестовом режиме
     if (vfs_dir == "/opt/users") {
-        // ПРОВЕРЯЕМ: не существует ли уже пользователь
-        struct passwd *pwd_check = getpwnam(username.c_str());
-        if (pwd_check) {
-            std::cout << "DEBUG: User " << username << " already exists with UID " << pwd_check->pw_uid << std::endl;
-        }
+        // ПРОВЕРЯЕМ время начала
+        std::time_t start_time = std::time(nullptr);
+        std::cout << "DEBUG: Start time: " << start_time << std::endl;
         
         // 1. Используем adduser как требует задание
         std::string cmd = "adduser --disabled-password --gecos '' " + username + " 2>&1";
         std::cout << "DEBUG: Executing: " << cmd << std::endl;
+        std::cout.flush();
         
-        // Запускаем команду и захватываем вывод
-        FILE* pipe = popen(cmd.c_str(), "r");
-        if (!pipe) {
-            std::cout << "DEBUG: Failed to execute command" << std::endl;
-            return;
-        }
-        
-        char buffer[128];
-        std::string output;
-        while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-            output += buffer;
-        }
-        
-        int result = pclose(pipe);
+        // Запускаем команду
+        int result = system(cmd.c_str());
         std::cout << "DEBUG: Command exit code: " << result << std::endl;
-        std::cout << "DEBUG: Command output:\n" << output << std::endl;
         
-        // 2. Проверяем результат
+        // 2. СИНХРОНИЗИРУЕМ файловую систему
+        system("sync");
+        
+        // 3. Даем время на запись
+        usleep(100000); // 100ms
+        
+        // 4. Проверяем результат
         struct passwd *pwd = getpwnam(username.c_str());
         if (pwd) {
             std::cout << "DEBUG: Success! User " << username << " added with UID " << pwd->pw_uid << std::endl;
             
-            // Проверяем, виден ли в /etc/passwd
+            // Дополнительная проверка - читаем файл напрямую
             std::ifstream passwd_file("/etc/passwd");
             std::string line;
-            bool found_in_file = false;
+            bool found = false;
             while (std::getline(passwd_file, line)) {
                 if (line.find(username + ":") == 0) {
-                    std::cout << "DEBUG: Found in /etc/passwd: " << line << std::endl;
-                    found_in_file = true;
+                    std::cout << "DEBUG: Found in /etc/passwd file: " << line << std::endl;
+                    found = true;
                     break;
                 }
             }
+            passwd_file.close();
             
-            if (!found_in_file) {
-                std::cout << "DEBUG: WARNING: User not found in /etc/passwd file!" << std::endl;
+            if (!found) {
+                std::cout << "DEBUG: ERROR: User not in /etc/passwd file!" << std::endl;
             }
             
-            // 3. Создаем VFS файлы
+            // 5. Создаем VFS файлы
             std::string user_path = vfs_dir + "/" + username;
             mkdir(user_path.c_str(), 0755);
             
@@ -90,33 +85,24 @@ void handle_new_user(const std::string& username) {
                 shell_file.close();
             }
             
-            std::cout << "DEBUG: VFS files created for " << username << std::endl;
+            std::cout << "DEBUG: VFS files created" << std::endl;
             
         } else {
-            std::cout << "DEBUG: FAILED! User " << username << " not found after adduser" << std::endl;
-            
-            // Попробуем прочитать /etc/passwd напрямую
-            std::cout << "DEBUG: Checking /etc/passwd contents..." << std::endl;
-            std::ifstream passwd_file("/etc/passwd");
-            std::string line;
-            int line_num = 0;
-            while (std::getline(passwd_file, line)) {
-                line_num++;
-                if (line.find(username) != std::string::npos) {
-                    std::cout << "DEBUG: Line " << line_num << ": " << line << std::endl;
-                }
-            }
+            std::cout << "DEBUG: FAILED! User not found" << std::endl;
         }
         
+        std::time_t end_time = std::time(nullptr);
+        std::cout << "DEBUG: End time: " << end_time << std::endl;
+        std::cout << "DEBUG: Total time: " << (end_time - start_time) << " seconds" << std::endl;
+        
         std::cout << "User added: " << username << std::endl;
-        std::cout.flush(); // Важно!
+        std::cout.flush();
     }
 }
 
-// ... остальной код без изменений ...
-
 void monitor_directory() {
     std::cout << "DEBUG: Starting monitor for: " << vfs_dir << std::endl;
+    std::cout.flush();
     
     int fd = inotify_init();
     if (fd < 0) {
@@ -126,12 +112,13 @@ void monitor_directory() {
     
     int wd = inotify_add_watch(fd, vfs_dir.c_str(), IN_CREATE);
     if (wd < 0) {
-        std::cout << "DEBUG: inotify_add_watch failed for " << vfs_dir << std::endl;
+        std::cout << "DEBUG: inotify_add_watch failed" << std::endl;
         close(fd);
         return;
     }
     
-    std::cout << "DEBUG: Monitoring started for " << vfs_dir << std::endl;
+    std::cout << "DEBUG: Monitoring started" << std::endl;
+    std::cout.flush();
     
     char buf[4096];
     
@@ -140,7 +127,7 @@ void monitor_directory() {
         FD_ZERO(&fds);
         FD_SET(fd, &fds);
         
-        struct timeval tv = {0, 50000}; // 50ms
+        struct timeval tv = {0, 100000}; // 100ms
         
         int ret = select(fd + 1, &fds, NULL, NULL, &tv);
         
@@ -158,7 +145,7 @@ void monitor_directory() {
                 
                 if (ev->mask & IN_CREATE) {
                     if (ev->mask & IN_ISDIR) {
-                        std::cout << "DEBUG: Detected new directory: " << name << std::endl;
+                        std::cout << "DEBUG: Detected directory: " << name << std::endl;
                         handle_new_user(name);
                     }
                 }
@@ -171,7 +158,6 @@ void monitor_directory() {
 }
 
 void init_vfs() {
-    // Определяем директорию
     struct stat st;
     if (stat("/opt/users", &st) != -1) {
         vfs_dir = "/opt/users";
@@ -184,7 +170,6 @@ void init_vfs() {
     
     mkdir(vfs_dir.c_str(), 0755);
     
-    // Инициализируем существующих пользователей
     std::ifstream passwd("/etc/passwd");
     std::string line;
     int count = 0;
@@ -200,7 +185,6 @@ void init_vfs() {
                 
                 mkdir(user_dir.c_str(), 0755);
                 
-                // Разбираем строку
                 std::vector<std::string> parts;
                 std::stringstream ss(line);
                 std::string part;
@@ -220,20 +204,22 @@ void init_vfs() {
     }
     
     std::cout << "VFS initialized with " << count << " users" << std::endl;
+    std::cout.flush();
     
-    // Запускаем мониторинг
     std::thread(monitor_directory).detach();
 }
 
+// ... остальной код (main, echo, env) без изменений ...
+
 int main() {
-    // Отключаем буферизацию
     std::cout << std::unitbuf;
+    std::cerr << std::unitbuf;
     
     std::cout << "UID: " << geteuid() << std::endl;
     
     init_vfs();
     
-    // Главный цикл - простой
+    // Простая обработка команд
     std::string input;
     while (std::getline(std::cin, input)) {
         if (input == "exit" || input == "\\q") {
@@ -241,9 +227,16 @@ int main() {
             break;
         }
         
-        // Простая обработка команд для базовых тестов
         if (input.find("echo ") == 0 || input.find("debug ") == 0) {
-            std::cout << input.substr(input.find(' ') + 1) << std::endl;
+            std::string output = input.substr(input.find(' ') + 1);
+            // Убираем кавычки если есть
+            if (output.size() >= 2) {
+                if ((output.front() == '\'' && output.back() == '\'') ||
+                    (output.front() == '"' && output.back() == '"')) {
+                    output = output.substr(1, output.size() - 2);
+                }
+            }
+            std::cout << output << std::endl;
         }
         else if (input == "\\e $PATH" || input == "\\e PATH") {
             const char* path = getenv("PATH");
@@ -265,12 +258,34 @@ int main() {
             system(("lsblk " + disk + " 2>/dev/null || echo 'Try: fdisk -l " + disk + "'").c_str());
         }
         else if (!input.empty()) {
-            system(input.c_str());
+            pid_t pid = fork();
+            if (pid == 0) {
+                std::vector<std::string> args;
+                std::stringstream ss(input);
+                std::string arg;
+                while (ss >> arg) {
+                    args.push_back(arg);
+                }
+                
+                std::vector<char*> exec_args;
+                for (const auto& a : args) {
+                    exec_args.push_back(const_cast<char*>(a.c_str()));
+                }
+                exec_args.push_back(nullptr);
+                
+                execvp(exec_args[0], exec_args.data());
+                std::cout << args[0] << ": command not found" << std::endl;
+                exit(127);
+            } else if (pid > 0) {
+                waitpid(pid, nullptr, 0);
+            }
         }
+        
+        std::cout.flush();
     }
     
     running = false;
-    usleep(100000); // Даем время мониторингу завершиться
+    usleep(200000); // Даем время мониторингу завершиться
     
     return 0;
 }
