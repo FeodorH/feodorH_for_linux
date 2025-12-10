@@ -12,6 +12,9 @@
 #include <thread>
 #include <vector>
 #include <ctime>
+#include <sys/types.h>
+#include <sys/wait.h>
+
 
 std::atomic<bool> running{true};
 std::string vfs_dir;
