@@ -360,55 +360,7 @@ int main() {
             // В тестовом режиме игнорируем другие команды
         }
     } 
-    else {
-        // Нормальный режим с полной функциональностью
-        signal(SIGHUP, sighup_handler);
-        
-        while (true) {
-            std::cout << "₽ " << std::flush;
-            
-            if (!std::getline(std::cin, input)) {
-                break;
-            }
-            
-            if (input.empty()) continue;
-        
-        // Выход
-        if (args[0] == "exit" || args[0] == "\\q") {
-            monitor_running = false;
-            break;
-        }
-        
-        // Внутренние команды
-        bool handled = false;
-        
-        if (handle_echo(args)) {
-            handled = true;
-        } else if (handle_env(args)) {
-            handled = true;
-        } else if (handle_partition(args)) {
-            handled = true;
-        }
-        
-        // Внешние команды
-        if (!handled) {
-            pid_t pid = fork();
-            if (pid == 0) {
-                std::vector<char*> exec_args;
-                for (const auto& a : args) {
-                    exec_args.push_back(const_cast<char*>(a.c_str()));
-                }
-                exec_args.push_back(nullptr);
-                
-                execvp(exec_args[0], exec_args.data());
-                std::cout << args[0] << ": command not found" << std::endl;
-                exit(127);
-            } else if (pid > 0) {
-                waitpid(pid, nullptr, 0);
-            }
-        }
-    }
-}
+   
     monitor_running = false;
     // Даем время мониторингу завершиться
     usleep(100000);
