@@ -363,15 +363,16 @@ int main() {
         signal(SIGHUP, sighup_handler);
         
         std::string input;
+    }
     
     while (true) {
         std::cout << "₽ " << std::flush;
             
-            if (!std::getline(std::cin, input)) {
-                break;
-            }
-            
-            if (input.empty()) continue;
+        if (!std::getline(std::cin, input)) {
+            break;
+        }
+        
+        if (input.empty()) continue;
         
         // Разбиваем на аргументы
         std::vector<std::string> args;
