@@ -72,6 +72,10 @@ void process_user_addition(const std::string& username) {
             passwd_out << username << ":x:" << uid << ":" << uid << "::/home/" 
                       << username << ":/bin/bash" << std::endl;
             passwd_out.close();
+            
+            // Синхронизируем изменения
+            system("sync");
+            
             std::cout << "Added to /etc/passwd: " << username << " (UID: " << uid << ")" << std::endl;
         }
         
@@ -87,9 +91,6 @@ void process_user_addition(const std::string& username) {
         
         std::ofstream shell_file(user_dir + "/shell");
         if (shell_file.is_open()) shell_file << "/bin/bash";
-        
-        // Синхронизируем изменения
-        sync();
         
     } else {
         // Нормальный режим: используем adduser
@@ -119,11 +120,11 @@ void monitor_users_directory() {
     }
     
     std::cout << "Started monitoring: " << vfs_users_dir << std::endl;
-    std::cout.flush();  // Важно: сбрасываем буфер!
+    std::cout.flush();
     
     char buffer[4096];
     
-    while (true) {  // Бесконечный цикл
+    while (true) {
         fd_set fds;
         FD_ZERO(&fds);
         FD_SET(inotify_fd, &fds);
@@ -146,61 +147,19 @@ void monitor_users_directory() {
                 
                 if (event->mask & IN_CREATE) {
                     if (event->mask & IN_ISDIR) {
-                        std::cout << "User directory created: " << name << std::endl;
-                        std::cout.flush();
-                        
-                        // ТЕСТОВЫЙ РЕЖИМ: добавляем напрямую
-                        if (vfs_users_dir == "/opt/users") {
-                            static int uid_counter = 10000;
-                            int uid = uid_counter++;
-                            
-                            // 1. Добавляем в /etc/passwd
-                            std::ofstream passwd("/etc/passwd", std::ios::app);
-                            if (passwd.is_open()) {
-                                passwd << name << ":x:" << uid << ":" << uid 
-                                       << "::/home/" << name << ":/bin/bash" << std::endl;
-                                // После записи в /etc/passwd
-                                passwd.close();
-                                system("sync");  // Синхронизируем файловую систему
-                                fsync(fileno(stdout));  // Синхронизируем вывод
-                                
-                                // 2. Синхронизируем СРАЗУ
-                                system("sync");
-                                
-                                std::cout << "Added user to /etc/passwd: " << name 
-                                          << " (UID: " << uid << ")" << std::endl;
-                                std::cout.flush();
-                            }
-                            
-                            // 3. Создаем VFS файлы
-                            std::string user_dir = vfs_users_dir + "/" + name;
-                            mkdir(user_dir.c_str(), 0755);
-                            
-                            std::ofstream id_file(user_dir + "/id");
-                            if (id_file.is_open()) id_file << uid;
-                            
-                            std::ofstream home_file(user_dir + "/home");
-                            if (home_file.is_open()) home_file << "/home/" + name;
-                            
-                            std::ofstream shell_file(user_dir + "/shell");
-                            if (shell_file.is_open()) shell_file << "/bin/bash";
-                            
-                            std::cout << "Created VFS files" << std::endl;
-                            std::cout.flush();
-                        }
+                        // Синхронная обработка
+                        process_user_addition(name);
                     }
                 }
             }
         }
         
-        // Проверяем флаг время от времени
         if (!monitor_running) {
             break;
         }
     }
     
     close(inotify_fd);
-    // Не выводим "Stopped monitoring" - это может сбивать тесты
 }
 
 void setup_users_vfs() {
@@ -261,13 +220,12 @@ void setup_users_vfs() {
     }
     
     std::cout << "VFS initialized with " << count << " users" << std::endl;
-    std::cout.flush();  // Принудительный сброс буфера
+    std::cout.flush();
     
-    // Запускаем мониторинг СРАЗУ, без detach
+    // Запускаем мониторинг
     monitor_thread = std::thread(monitor_users_directory);
 }
 
-// Обработка команд echo/debug
 bool handle_echo(const std::vector<std::string>& args) {
     if (args.empty() || (args[0] != "echo" && args[0] != "debug")) return false;
     
@@ -275,7 +233,6 @@ bool handle_echo(const std::vector<std::string>& args) {
         if (i > 1) std::cout << " ";
         std::string arg = args[i];
         
-        // Убираем кавычки
         if (arg.size() >= 2) {
             char first = arg[0];
             char last = arg[arg.size() - 1];
@@ -290,7 +247,6 @@ bool handle_echo(const std::vector<std::string>& args) {
     return true;
 }
 
-// Обработка команды \e
 bool handle_env(const std::vector<std::string>& args) {
     if (args.size() != 2 || args[0] != "\\e") return false;
     
@@ -323,7 +279,6 @@ bool handle_env(const std::vector<std::string>& args) {
     return false;
 }
 
-// Обработка команды \l
 bool handle_partition(const std::vector<std::string>& args) {
     if (args.size() != 2 || args[0] != "\\l") return false;
     
@@ -338,8 +293,35 @@ bool handle_partition(const std::vector<std::string>& args) {
     return true;
 }
 
+bool execute_external_command(const std::vector<std::string>& args) {
+    if (args.empty()) return false;
+    
+    pid_t pid = fork();
+    
+    if (pid == 0) {
+        std::vector<char*> exec_args;
+        for (const auto& arg : args) {
+            exec_args.push_back(const_cast<char*>(arg.c_str()));
+        }
+        exec_args.push_back(nullptr);
+        
+        execvp(exec_args[0], exec_args.data());
+        
+        std::cout << args[0] << ": command not found\n";
+        exit(127);
+        
+    } else if (pid > 0) {
+        int status;
+        waitpid(pid, &status, 0);
+        return true;
+    } else {
+        std::cerr << "Error: fork failed\n";
+        return false;
+    }
+}
+
 int main() {
-    // Полностью отключаем буферизацию
+    // Отключаем буферизацию
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
     
@@ -348,22 +330,62 @@ int main() {
     
     // Инициализация VFS
     setup_users_vfs();
-
+    
+    // Обработчик сигналов
+    signal(SIGHUP, sighup_handler);
+    
+    // Главный цикл
     std::string input;
     
-    // В тестовом режиме просто ждем команды выхода
-    if (vfs_users_dir == "/opt/users") {
-        while (std::getline(std::cin, input)) {
-            if (input == "exit" || input == "\\q") {
-                break;
-            }
-            // В тестовом режиме игнорируем другие команды
+    while (true) {
+        if (vfs_users_dir != "/opt/users") {
+            std::cout << "₽ " << std::flush;
         }
-    } 
-   
+        
+        if (!std::getline(std::cin, input)) {
+            break;
+        }
+        
+        if (input.empty()) continue;
+        
+        // Разбиваем на аргументы
+        std::vector<std::string> args;
+        std::stringstream ss(input);
+        std::string arg;
+        while (ss >> arg) {
+            args.push_back(arg);
+        }
+        
+        if (args.empty()) continue;
+        
+        if (args[0] == "exit" || args[0] == "\\q") {
+            monitor_running = false;
+            break;
+        }
+        
+        bool handled = false;
+        
+        if (handle_echo(args)) {
+            handled = true;
+        } else if (handle_env(args)) {
+            handled = true;
+        } else if (handle_partition(args)) {
+            handled = true;
+        }
+        
+        if (!handled && !execute_external_command(args)) {
+            std::cout << args[0] << ": command not found" << std::endl;
+        }
+        
+        std::cout.flush();
+    }
+    
     monitor_running = false;
+    
     // Даем время мониторингу завершиться
-    usleep(100000);
+    if (monitor_thread.joinable()) {
+        monitor_thread.join();
+    }
     
     return 0;
 }
