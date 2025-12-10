@@ -69,6 +69,14 @@ jobs:
           
           echo '=== Running tests ==='
           cd /opt && pytest -v --log-cli-level=DEBUG
+
+          docker exec kubsh-test bash -c "
+          echo '=== Checking /etc/passwd ==='
+          tail -5 /etc/passwd
+          echo '=== Checking /opt/users ==='
+          ls -la /opt/users/
+          echo '=== Checking processes ==='
+          ps aux | grep kubsh
         "
       
     - name: Cleanup
