@@ -1,6 +1,7 @@
 #include <iostream>
 #include <string>
 #include <fstream>
+#include <sstream>
 #include <cstdlib>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -9,6 +10,7 @@
 #include <pwd.h>
 #include <atomic>
 #include <thread>
+#include <vector>
 
 std::atomic<bool> running{true};
 std::string vfs_dir;
