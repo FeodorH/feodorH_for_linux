@@ -348,41 +348,30 @@ int main() {
     
     // Инициализация VFS
     setup_users_vfs();
+
+    std::string input;
     
     // В тестовом режиме просто ждем команды выхода
     if (vfs_users_dir == "/opt/users") {
-        std::string input;
         while (std::getline(std::cin, input)) {
             if (input == "exit" || input == "\\q") {
                 break;
             }
             // В тестовом режиме игнорируем другие команды
         }
-    } else {
+    } 
+    else {
         // Нормальный режим с полной функциональностью
         signal(SIGHUP, sighup_handler);
         
-        std::string input;
-    }
-    
-    while (true) {
-        std::cout << "₽ " << std::flush;
+        while (true) {
+            std::cout << "₽ " << std::flush;
             
-        if (!std::getline(std::cin, input)) {
-            break;
-        }
-        
-        if (input.empty()) continue;
-        
-        // Разбиваем на аргументы
-        std::vector<std::string> args;
-        std::stringstream ss(input);
-        std::string arg;
-        while (ss >> arg) {
-            args.push_back(arg);
-        }
-        
-        if (args.empty()) continue;
+            if (!std::getline(std::cin, input)) {
+                break;
+            }
+            
+            if (input.empty()) continue;
         
         // Выход
         if (args[0] == "exit" || args[0] == "\\q") {
@@ -418,10 +407,8 @@ int main() {
                 waitpid(pid, nullptr, 0);
             }
         }
-        
-        std::cout.flush();
     }
-    
+}
     monitor_running = false;
     // Даем время мониторингу завершиться
     usleep(100000);
