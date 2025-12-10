@@ -22,11 +22,13 @@
 std::atomic<bool> running{true};
 std::string vfs_dir;
 std::string history_path;
-volatile sig_atomic_t sighup_received = 0;
 
-// Обработчик SIGHUP
+// Глобальный флаг для SIGHUP
+std::atomic<bool> sighup_flag{false};
+
+// Обработчик сигнала - только устанавливает флаг
 void sighup_handler(int) {
-    sighup_received = 1;
+    sighup_flag = true;
 }
 
 // ================ VFS ФУНКЦИИ ================
@@ -412,9 +414,8 @@ int main() {
     
     while (running) {
         // Обработка SIGHUP
-        if (sighup_received) {
+        if (sighup_flag.exchange(false)) {
             std::cout << "Configuration reloaded" << std::endl;
-            sighup_received = 0;
         }
         
         // Приглашение только в нормальном режиме
