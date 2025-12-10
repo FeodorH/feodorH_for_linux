@@ -14,15 +14,10 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       
-    - name: Create modified test files
+    - name: Create test_vfs.py
       run: |
-        echo "=== Creating modified test files ==="
-        
-        # Создаем директорию с модифицированными тестами
         mkdir -p modified_tests
-        
-        # Создаем test_vfs.py с задержкой
-        cat > modified_tests/test_vfs.py << 'EOF'
+        cat > modified_tests/test_vfs.py << "EOF"
 import subprocess
 from time import sleep
 import os
@@ -36,8 +31,7 @@ def test_vfs_add_user(kubsh, vfs):
     username = random_string().lower()
     (vfs / username).mkdir(parents=True, exist_ok=True)
     
-    # КРИТИЧЕСКОЕ ИЗМЕНЕНИЕ: Добавляем задержку
-    sleep(0.5)  # Даем время kubsh обработать событие
+    sleep(0.5)
     
     user = None
     with open("/etc/passwd", "r") as f:
@@ -47,7 +41,6 @@ def test_vfs_add_user(kubsh, vfs):
 
     assert user is not None, f"User {username} not found in /etc/passwd"
     
-    # Дополнительная проверка VFS файлов
     assert (vfs / username / "id").exists()
     assert (vfs / username / "home").exists()
     assert (vfs / username / "shell").exists()
@@ -55,30 +48,26 @@ def test_vfs_add_user(kubsh, vfs):
 def test_vfs_remove_user(kubsh, vfs):
     username = random_string().lower()
     
-    # Сначала создаем пользователя через adduser напрямую
     subprocess.run(["adduser", "--disabled-password", "--gecos", "", username], 
                    capture_output=True)
     
-    # Создаем VFS структуру
     (vfs / username).mkdir(parents=True, exist_ok=True)
     (vfs / username / "id").write_text("1001")
     (vfs / username / "home").write_text(f"/home/{username}")
     (vfs / username / "shell").write_text("/bin/bash")
     
-    # Удаляем директорию
     import shutil
     shutil.rmtree(vfs / username)
     
-    # Даем время на обработку
     sleep(0.5)
     
-    # Проверяем, что пользователь удален
     result = subprocess.run(["id", username], capture_output=True)
     assert result.returncode != 0, f"User {username} still exists"
 EOF
-
-        # Создаем conftest.py с улучшенной обработкой сигналов
-        cat > modified_tests/conftest.py << 'EOF'
+      
+    - name: Create conftest.py
+      run: |
+        cat > modified_tests/conftest.py << "EOF"
 import subprocess
 import signal
 from time import sleep
@@ -101,28 +90,24 @@ def kubsh():
         text=True,
         bufsize=1
     )
-    sleep(0.2)  # Увеличили задержку
+    sleep(0.2)
     
     yield process
     
-    # Мягкое завершение
     if process.returncode is None:
         try:
-            process.stdin.write("\\q\n")
+            process.stdin.write("\\\\q\n")
             process.stdin.flush()
             sleep(0.1)
         except:
             pass
         
-        # Если все еще жив, ждем с таймаутом
         try:
             process.wait(timeout=2)
         except subprocess.TimeoutExpired:
-            # Принудительное завершение
             process.kill()
             process.wait()
     
-    # Логируем только при ошибках
     if process.returncode != 0:
         try:
             stdout, stderr = process.communicate(timeout=1)
@@ -135,18 +120,13 @@ def kubsh():
 def vfs():
     vfs_path = "/opt/users"
     
-    # Очищаем VFS перед тестом
     import shutil
     if os.path.exists(vfs_path):
         shutil.rmtree(vfs_path)
     os.makedirs(vfs_path, exist_ok=True)
     
     yield vfs_path
-    
-    # Не очищаем после теста, чтобы можно было проверить результаты
 EOF
-        
-        echo "=== Modified test files created ==="
       
     - name: Build and create package
       run: |
@@ -160,7 +140,6 @@ EOF
     - name: Setup test container
       run: |
         echo "=== Setting up test container ==="
-        # Запускаем контейнер в фоне
         docker run -d --name kubsh-test \
           --device /dev/fuse \
           --cap-add SYS_ADMIN \
@@ -169,17 +148,13 @@ EOF
           -e DEBUG=1 \
           tyvik/kubsh_test:master tail -f /dev/null
         
-        # Устанавливаем зависимости
         docker exec kubsh-test bash -c "
           apt-get update
           apt-get install -y fuse3 adduser
           ln -sf /usr/lib/x86_64-linux-gnu/libfuse3.so /usr/lib/x86_64-linux-gnu/libfuse3.so.3
         "
         
-        # Копируем пакет в контейнер
         docker cp kubsh.deb kubsh-test:/mnt/
-        
-        # Копируем модифицированные тесты в контейнер
         docker cp modified_tests/test_vfs.py kubsh-test:/opt/test_vfs.py
         docker cp modified_tests/conftest.py kubsh-test:/opt/conftest.py
       
@@ -190,19 +165,24 @@ EOF
           echo '=== Installing package ==='
           cd /mnt && apt-get install -y ./kubsh.deb
           
-          echo '=== Checking kubsh permissions ==='
-          ls -la /usr/bin/kubsh
-          
-          echo '=== Running VFS tests with modified files ==='
+          echo '=== Running tests with modified files ==='
           cd /opt
           
-          # Запускаем только тесты VFS с модифицированными файлами
-          echo '--- Running test_vfs_add_user ---'
-          python3 -m pytest test_vfs.py::test_vfs_add_user -v --log-cli-level=DEBUG || true
+          echo '--- Running VFS tests ---'
+          python3 -m pytest test_vfs.py -v --log-cli-level=DEBUG || true
           
-          echo -e '\n--- Running test_vfs_remove_user ---'
-          python3 -m pytest test_vfs.py::test_vfs_remove_user -v --log-cli-level=DEBUG || true
-          
-          echo -e '\n--- Running all basic tests ---'
+          echo -e '\n--- Running basic tests ---'
           python3 -m pytest test_basic.py -v --log-cli-level=DEBUG || true
+          
+          echo -e '\n--- Debug info ---'
+          echo 'Last 5 users in /etc/passwd:'
+          tail -5 /etc/passwd || true
+          echo -e '\nVFS directory contents:'
+          ls -la /opt/users/ || true
         "
+      
+    - name: Cleanup
+      if: always()
+      run: |
+        docker stop kubsh-test || true
+        docker rm kubsh-test || true
