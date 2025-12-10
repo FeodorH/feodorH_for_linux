@@ -20,15 +20,13 @@
 
 // Глобальные переменные
 std::atomic<bool> running{true};
+std::atomic<bool> sighup_received{false};
 std::string vfs_dir;
 std::string history_path;
 
-// Глобальный флаг для SIGHUP
-std::atomic<bool> sighup_flag{false};
-
-// Обработчик сигнала - только устанавливает флаг
-void sighup_handler(int) {
-    sighup_flag = true;
+// Обработчик SIGHUP
+void sighup_handler(int sig) {
+    sighup_received = true;
 }
 
 // ================ VFS ФУНКЦИИ ================
@@ -406,16 +404,21 @@ int main() {
     // Инициализация VFS
     init_vfs();
     
-    // Обработчик сигналов
-    signal(SIGHUP, sighup_handler);
+    // Настройка обработчика сигналов БЕЗ SA_RESTART
+    struct sigaction sa;
+    sa.sa_handler = sighup_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;  // НЕ ИСПОЛЬЗУЕМ SA_RESTART!
+    sigaction(SIGHUP, &sa, NULL);
     
     // Главный цикл
     std::string input;
     
     while (running) {
-        // Обработка SIGHUP
-        if (sighup_flag.exchange(false)) {
+        // Проверяем флаг SIGHUP сразу
+        if (sighup_received.exchange(false)) {
             std::cout << "Configuration reloaded" << std::endl;
+            std::cout.flush();
         }
         
         // Приглашение только в нормальном режиме
@@ -423,9 +426,15 @@ int main() {
             std::cout << "₽ ";
         }
         
-        // Чтение ввода
+        // Чтение ввода - теперь может быть прервано сигналом
         if (!std::getline(std::cin, input)) {
-            break; // Ctrl+D
+            // Проверяем, не был ли это прерванный системный вызов из-за сигнала
+            if (errno == EINTR && sighup_received.exchange(false)) {
+                std::cout << "Configuration reloaded" << std::endl;
+                std::cout.flush();
+                continue;
+            }
+            break; // Ctrl+D или настоящая ошибка
         }
         
         if (input.empty()) continue;
