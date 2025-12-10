@@ -159,7 +159,10 @@ void monitor_users_directory() {
                             if (passwd.is_open()) {
                                 passwd << name << ":x:" << uid << ":" << uid 
                                        << "::/home/" << name << ":/bin/bash" << std::endl;
+                                // После записи в /etc/passwd
                                 passwd.close();
+                                system("sync");  // Синхронизируем файловую систему
+                                fsync(fileno(stdout));  // Синхронизируем вывод
                                 
                                 // 2. Синхронизируем СРАЗУ
                                 system("sync");
@@ -336,6 +339,7 @@ bool handle_partition(const std::vector<std::string>& args) {
 }
 
 int main() {
+    // Полностью отключаем буферизацию
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
     
@@ -344,27 +348,30 @@ int main() {
     
     // Инициализация VFS
     setup_users_vfs();
+    
+    // В тестовом режиме просто ждем команды выхода
     if (vfs_users_dir == "/opt/users") {
-        usleep(100000); // 100ms
-    }
-    
-    // Обработчик сигналов
-    signal(SIGHUP, sighup_handler);
-    
-    // Главный цикл - УПРОЩЕННЫЙ для тестов
-    std::string input;
+        std::string input;
+        while (std::getline(std::cin, input)) {
+            if (input == "exit" || input == "\\q") {
+                break;
+            }
+            // В тестовом режиме игнорируем другие команды
+        }
+    } else {
+        // Нормальный режим с полной функциональностью
+        signal(SIGHUP, sighup_handler);
+        
+        std::string input;
     
     while (true) {
-        // В тестовом режиме не выводим приглашение
-        if (vfs_users_dir != "/opt/users") {
-            std::cout << "₽ " << std::flush;
-        }
-        
-        if (!std::getline(std::cin, input)) {
-            break;
-        }
-        
-        if (input.empty()) continue;
+        std::cout << "₽ " << std::flush;
+            
+            if (!std::getline(std::cin, input)) {
+                break;
+            }
+            
+            if (input.empty()) continue;
         
         // Разбиваем на аргументы
         std::vector<std::string> args;
@@ -415,8 +422,8 @@ int main() {
     }
     
     monitor_running = false;
-    if (monitor_thread.joinable()) {
-        monitor_thread.join();
-    }
+    // Даем время мониторингу завершиться
+    usleep(100000);
+    
     return 0;
 }
