@@ -44,25 +44,18 @@ jobs:
         ls -la *.deb
         file kubsh.deb || echo "No deb file found"
       
-    - name: Run tests with sudo setup
+    - name: Run tests
       run: |
-        echo "=== Setting up test environment ==="
+        echo "=== Running tests ==="
         docker run --rm \
           -v $PWD:/mnt \
-          --privileged \
+          -v /tmp/shared_passwd:/etc/passwd:rw \
           --user root \
-          --cap-add=SYS_ADMIN \
           tyvik/kubsh_test:master \
           bash -c "
-            # Устанавливаем необходимые утилиты
-            apt-get update && apt-get install -y sudo adduser
-            
-            # Настраиваем sudo без пароля для root
-            echo 'root ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
-            
             echo '=== Installing package ==='
             cd /mnt && apt install -y ./kubsh.deb
             
             echo '=== Running tests ==='
-            cd /opt && pytest -v --log-cli-level=10
+            cd /opt && pytest -v
           "
