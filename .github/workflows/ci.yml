@@ -28,8 +28,6 @@ jobs:
           kubsh-builder \
           bash -c "
             cd /workspace && \
-            echo 'Files in workspace:' && \
-            ls -la && \
             echo '=== Compiling ===' && \
             make && \
             echo '=== Creating package ===' && \
@@ -38,31 +36,42 @@ jobs:
             ls -la *.deb
           "
       
-    - name: Verify package
+    - name: Setup test container (как у товарища)
       run: |
-        echo "=== Verifying package ==="
-        ls -la *.deb
-        file kubsh.deb || echo "No deb file found"
-      
-    - name: Run tests with sudo setup
-      run: |
-        echo "=== Setting up test environment ==="
-        docker run --rm \
-          -v $PWD:/mnt \
-          --privileged \
+        echo "=== Setting up test container ==="
+        # Запускаем контейнер в фоне
+        docker run -d --name kubsh-test \
+          --device /dev/fuse \
+          --cap-add SYS_ADMIN \
+          --security-opt apparmor:unconfined \
           --user root \
-          --cap-add=SYS_ADMIN \
-          tyvik/kubsh_test:master \
-          bash -c "
-            # Устанавливаем необходимые утилиты
-            apt-get update && apt-get install -y sudo adduser
-            
-            # Настраиваем sudo без пароля для root
-            echo 'root ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
-            
-            echo '=== Installing package ==='
-            cd /mnt && apt install -y ./kubsh.deb
-            
-            echo '=== Running tests ==='
-            cd /opt && pytest -v --log-cli-level=10
-          "
+          tyvik/kubsh_test:master tail -f /dev/null
+        
+        # Устанавливаем зависимости
+        docker exec kubsh-test bash -c "
+          apt-get update
+          apt-get install -y fuse3 adduser
+          ln -sf /usr/lib/x86_64-linux-gnu/libfuse3.so /usr/lib/x86_64-linux-gnu/libfuse3.so.3
+        "
+        
+        # Копируем пакет в контейнер
+        docker cp kubsh.deb kubsh-test:/mnt/
+      
+    - name: Run tests in container
+      run: |
+        echo "=== Running tests ==="
+        docker exec kubsh-test bash -c "
+          echo '=== Installing package ==='
+          cd /mnt && apt-get install -y ./kubsh.deb
+          
+          echo '=== Checking kubsh permissions ==='
+          ls -la /usr/bin/kubsh
+          
+          echo '=== Running tests ==='
+          cd /opt && pytest -v --log-cli-level=DEBUG
+        "
+      
+    - name: Cleanup
+      run: |
+        docker stop kubsh-test || true
+        docker rm kubsh-test || true
