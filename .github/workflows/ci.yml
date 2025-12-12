@@ -33,8 +33,12 @@ jobs:
         
         echo "=== Generated DEB package ==="
         ls -la *.deb
+        
+        # Сохраняем имя пакета для релиза
+        DEB_FILE=$(ls kubsh*.deb)
+        echo "DEB_FILE=$DEB_FILE" >> $GITHUB_ENV
       
-    - name: Upload DEB package as artifact
+    - name: Upload DEB package for release
       uses: actions/upload-artifact@v4
       with:
         name: kubsh-deb-package
@@ -178,13 +182,27 @@ jobs:
             echo 'Running original test 9 (expected to fail):'
             python3 -m pytest test_vfs.py::test_vfs_add_user -v 2>&1 | grep -E '(PASSED|FAILED|assert|ERROR)' || true
           "
+
+  create-release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [build-deb, test-with-fix]
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
       
-    - name: Upload test results
-      if: always()
-      uses: actions/upload-artifact@v4
+    - name: Download DEB package
+      uses: actions/download-artifact@v4
       with:
-        name: test-results
-        path: |
-          fixed_tests/
-          kubsh*.deb
-        retention-days: 7
+        name: kubsh-deb-package
+        
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: kubsh*.deb
+        generate_release_notes: true
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
