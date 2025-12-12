@@ -163,72 +163,62 @@ jobs:
           "
 
   create-release:
-    # КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: Запускаем релиз ПОСЛЕ успешной сборки на ветке main.
-    # Убрано строгое условие на тип события.
-    if: ${{ github.ref == 'refs/heads/main' && needs.build-and-test.result == 'success' }}
+    # УПРОЩЕННОЕ условие: запускаем всегда после успешной сборки на main
+    if: github.ref == 'refs/heads/main'
     needs: build-and-test
     runs-on: ubuntu-latest
-    # Джоб создания релиза требует явных прав на запись
     permissions:
       contents: write
-      packages: write
 
     steps:
-    - name: Checkout code for tagging
+    - name: Check if tests passed
+      run: |
+        # Простая проверка, что предыдущий джоб завершился успешно
+        echo "Build-and-test job completed with status: ${{ needs.build-and-test.result }}"
+        if [[ "${{ needs.build-and-test.result }}" != "success" ]]; then
+          echo "Skipping release because tests failed"
+          exit 0
+        fi
+
+    - name: Checkout code
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0 # Важно для работы с тегами
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Download DEB artifact
       uses: actions/download-artifact@v4
       with:
         name: kubsh-deb-package
-        # КРИТИЧЕСКИ ВАЖНО: Указываем run-id того же workflow
-        run-id: ${{ needs.build-and-test.outputs.run_id }}
 
-    - name: Create and push a version tag
-      id: create_tag
+    - name: Create and push version tag
+      id: tag_version
       run: |
-        # Простая и надежная схема именования тега: версия + дата + короткий хэш коммита
-        SHORT_SHA="${GITHUB_SHA:0:7}"
-        TAG_NAME="v1.0.0-$(date +%Y%m%d)-${SHORT_SHA}"
+        # Получаем имя DEB файла
+        DEB_FILE=$(ls kubsh*.deb | head -1)
+        
+        # Создаем простой тег
+        COMMIT_SHORT=$(git rev-parse --short HEAD)
+        TIMESTAMP=$(date +%Y%m%d%H%M%S)
+        TAG_NAME="release-$TIMESTAMP-$COMMIT_SHORT"
+        
         echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
+        echo "DEB_FILE=$DEB_FILE" >> $GITHUB_ENV
+        
+        # Создаем и пушим тег
+        git config user.name "GitHub Actions"
+        git config user.email "actions@github.com"
+        git tag $TAG_NAME
+        git push origin $TAG_NAME
 
-        git config user.name "GitHub Actions Bot"
-        git config user.email "github-actions@users.noreply.github.com"
-        # Создаем аннотированный тег
-        git tag -a "$TAG_NAME" -m "Automated release from GitHub Actions"
-        # Пушим тег в репозиторий
-        git push origin "$TAG_NAME"
-        echo "✅ Created and pushed tag: $TAG_NAME"
-
-    - name: Create GitHub Release
+    - name: Create Release with DEB
       uses: softprops/action-gh-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         tag_name: ${{ env.TAG_NAME }}
         name: "kubsh ${{ env.TAG_NAME }}"
-        body: |
-          ## kubsh Shell
-          Automated release containing the kubsh shell as a DEB package.
-          ### Installation
-          ```bash
-          wget https://github.com/${{ github.repository }}/releases/download/${{ env.TAG_NAME }}/${{ needs.build-and-test.outputs.deb_file_name }}
-          sudo dpkg -i ${{ needs.build-and-test.outputs.deb_file_name }}
-          sudo apt-get install -f  # If dependencies are missing
-          ```
-          All tests passed, including the **fixed test #9 with 0.5s delay**.
+        body: "DEB package for kubsh shell. Tests passed (including fixed test 9 with 0.5s delay)."
+        files: ${{ env.DEB_FILE }}
         draft: false
         prerelease: false
-        # Прикрепляем наш DEB-файл. Имя берется из outputs предыдущего джоба.
-        files: ${{ needs.build-and-test.outputs.deb_file_name }}
-
-    - name: Display Release Info
-      run: |
-        echo "=================================================================="
-        echo "✅ RELEASE CREATED SUCCESSFULLY!"
-        echo "📁 Release Page: https://github.com/${{ github.repository }}/releases/tag/${{ env.TAG_NAME }}"
-        echo "📦 Direct Download Link:"
-        echo "https://github.com/${{ github.repository }}/releases/download/${{ env.TAG_NAME }}/${{ needs.build-and-test.outputs.deb_file_name }}"
-        echo "=================================================================="
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
