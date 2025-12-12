@@ -1,0 +1,42 @@
+name: Create Release
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Build DEB package
+      run: |
+        docker build -t kubsh-builder .
+        docker run --rm -v $PWD:/workspace kubsh-builder bash -c "cd /workspace && make && make deb"
+        # Имя файла — просто kubsh.deb
+        DEB_FILE=$(ls kubsh*.deb | head -1)
+        cp "$DEB_FILE" kubsh.deb
+        echo "DEB_FILE=kubsh.deb" >> $GITHUB_ENV
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v1.0.0
+        name: Release v1.0.0
+        body: |
+          Первый стабильный релиз kubsh.
+          ### Установка
+          ```bash
+          wget https://github.com/${{ github.repository }}/releases/download/v1.0.0/kubsh.deb
+          sudo dpkg -i kubsh.deb
+          ```
+        draft: false
+        prerelease: false
+        files: kubsh.deb
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
