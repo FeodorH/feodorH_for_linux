@@ -18,7 +18,6 @@
 #include <algorithm>
 #include <fcntl.h>
 
-// Глобальные переменные
 std::atomic<bool> running{true};
 std::atomic<bool> sighup_received{false};
 std::string vfs_dir;
@@ -31,7 +30,7 @@ void sighup_handler(int sig) {
 
 // ================ VFS ФУНКЦИИ ================
 
-// Принудительная синхронизация файловой системы
+// синхронизация файловой системы
 void force_sync() {
     sync();
     usleep(50000); // 50ms
@@ -55,16 +54,12 @@ bool user_exists(const std::string& username) {
 
 // Создание пользователя
 void create_user(const std::string& username) {
-    std::cout << "DEBUG: Adding user: " << username << std::endl;
-    
     if (user_exists(username)) {
-        std::cout << "DEBUG: User already exists: " << username << std::endl;
         return;
     }
     
     // В тестовом режиме добавляем напрямую в /etc/passwd
     if (vfs_dir == "/opt/users") {
-        std::cout << "Test mode: adding user directly to /etc/passwd" << std::endl;
         
         // Генерируем уникальный UID
         static std::atomic<int> next_uid{10000};
@@ -91,7 +86,6 @@ void create_user(const std::string& username) {
     } else {
         // Нормальный режим
         std::string cmd = "adduser --disabled-password --gecos '' " + username + " 2>&1";
-        std::cout << "Executing: " << cmd << std::endl;
         
         int result = system(cmd.c_str());
         std::cout << "Command result: " << result << std::endl;
@@ -123,11 +117,8 @@ void create_user(const std::string& username) {
 
 // Удаление пользователя
 void delete_user(const std::string& username) {
-    std::cout << "DEBUG: Deleting user: " << username << std::endl;
-    
     // В тестовом режиме удаляем из /etc/passwd
     if (vfs_dir == "/opt/users") {
-        std::cout << "Test mode: removing user from /etc/passwd" << std::endl;
         
         // Читаем весь файл, пропускаем нужного пользователя
         std::ifstream passwd_in("/etc/passwd");
@@ -153,7 +144,6 @@ void delete_user(const std::string& username) {
     } else {
         // Нормальный режим
         std::string cmd = "userdel -r " + username + " 2>&1";
-        std::cout << "Executing: " << cmd << std::endl;
         
         int result = system(cmd.c_str());
         std::cout << "Command result: " << result << std::endl;
@@ -167,22 +157,17 @@ void delete_user(const std::string& username) {
 
 // Мониторинг директории VFS
 void monitor_directory() {
-    std::cout << "DEBUG: Starting monitor for: " << vfs_dir << std::endl;
     
     int fd = inotify_init();
     if (fd < 0) {
-        std::cout << "DEBUG: inotify_init failed" << std::endl;
         return;
     }
     
     int wd = inotify_add_watch(fd, vfs_dir.c_str(), IN_CREATE | IN_DELETE | IN_MOVED_TO | IN_MOVED_FROM);
     if (wd < 0) {
-        std::cout << "DEBUG: inotify_add_watch failed" << std::endl;
         close(fd);
         return;
     }
-    
-    std::cout << "DEBUG: Monitoring started" << std::endl;
     
     char buf[4096];
     
@@ -209,13 +194,11 @@ void monitor_directory() {
                 
                 if (ev->mask & IN_CREATE) {
                     if (ev->mask & IN_ISDIR) {
-                        std::cout << "DEBUG: Directory created: " << name << std::endl;
                         create_user(name);
                     }
                 }
                 else if (ev->mask & (IN_DELETE | IN_MOVED_FROM)) {
                     if (ev->mask & IN_ISDIR) {
-                        std::cout << "DEBUG: Directory deleted: " << name << std::endl;
                         delete_user(name);
                     }
                 }
@@ -224,7 +207,6 @@ void monitor_directory() {
     }
     
     close(fd);
-    std::cout << "DEBUG: Monitoring stopped" << std::endl;
 }
 
 // Инициализация VFS
@@ -232,11 +214,10 @@ void init_vfs() {
     struct stat st;
     if (stat("/opt/users", &st) != -1) {
         vfs_dir = "/opt/users";
-        std::cout << "Test mode: /opt/users" << std::endl;
     } else {
         const char* home = getenv("HOME");
         vfs_dir = std::string(home ? home : "/root") + "/users";
-        std::cout << "Normal mode: " << vfs_dir << std::endl;
+        std::cout << "Path of VFS: " << vfs_dir << std::endl;
     }
     
     mkdir(vfs_dir.c_str(), 0755);
@@ -277,8 +258,6 @@ void init_vfs() {
     // Запускаем мониторинг в отдельном потоке
     std::thread(monitor_directory).detach();
 }
-
-// ================ КОМАНДЫ ШЕЛЛА ================
 
 // Добавление в историю
 void save_to_history(const std::string& command) {
@@ -386,10 +365,7 @@ bool execute_external(const std::vector<std::string>& args) {
     return false;
 }
 
-// ================ ГЛАВНАЯ ФУНКЦИЯ ================
-
 int main() {
-    // Отключаем буферизацию для тестов
     std::cout << std::unitbuf;
     std::cerr << std::unitbuf;
     
@@ -400,35 +376,30 @@ int main() {
     } else {
         history_path = "/root/.kubsh_history";
     }
+    std::cout<<"Path of History:"<<history_path<<"\n";
     
     // Инициализация VFS
     init_vfs();
     
-    // Настройка обработчика сигналов БЕЗ SA_RESTART
     struct sigaction sa;
     sa.sa_handler = sighup_handler;
     sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;  // НЕ ИСПОЛЬЗУЕМ SA_RESTART!
+    sa.sa_flags = 0; 
     sigaction(SIGHUP, &sa, NULL);
-    
-    // Главный цикл
+  
     std::string input;
     
     while (running) {
-        // Проверяем флаг SIGHUP сразу
         if (sighup_received.exchange(false)) {
             std::cout << "Configuration reloaded" << std::endl;
             std::cout.flush();
         }
-        
-        // Приглашение только в нормальном режиме
+      
         if (vfs_dir != "/opt/users") {
             std::cout << "₽ ";
         }
         
-        // Чтение ввода - теперь может быть прервано сигналом
         if (!std::getline(std::cin, input)) {
-            // Проверяем, не был ли это прерванный системный вызов из-за сигнала
             if (errno == EINTR && sighup_received.exchange(false)) {
                 std::cout << "Configuration reloaded" << std::endl;
                 std::cout.flush();
@@ -438,11 +409,9 @@ int main() {
         }
         
         if (input.empty()) continue;
-        
-        // Сохранение в историю
+
         save_to_history(input);
         
-        // Разбиение на аргументы
         std::vector<std::string> args;
         std::stringstream ss(input);
         std::string arg;
@@ -451,8 +420,7 @@ int main() {
         }
         
         if (args.empty()) continue;
-        
-        // Обработка команд выхода
+
         if (args[0] == "exit" || args[0] == "\\q") {
             running = false;
             break;
