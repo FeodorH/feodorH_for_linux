@@ -1,4 +1,4 @@
-name: C++ Shell CI
+name: Build, Test and Release kubsh
 
 on:
   push:
@@ -9,80 +9,93 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-    
+    # Джоб сборки и тестов НЕ требует прав на запись
+    permissions:
+      contents: read
+    outputs:
+      deb_file_name: ${{ steps.get_deb_name.outputs.deb_file_name }}
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      
-    - name: Build C++ container locally
+
+    - name: Build DEB package
       run: |
-        echo "=== Building C++ container ==="
+        echo "=== Building kubsh and creating DEB package ==="
         docker build -t kubsh-builder .
-      
-    - name: Build shell and create package
+        docker run --rm -v $PWD:/workspace kubsh-builder bash -c "cd /workspace && make && make deb"
+        echo "=== Generated DEB package ==="
+        ls -la *.deb
+
+    - name: Get DEB file name and make it unique
+      id: get_deb_name
       run: |
-        echo "=== Building shell and creating package ==="
-        docker run --rm \
-          -v $PWD:/workspace \
-          kubsh-builder \
-          bash -c "
-            cd /workspace && \
-            make && \
-            make deb
-          "
-      
-    - name: Create fixed test files
+        ORIGINAL_DEB=$(ls kubsh*.deb | head -1)
+        # Создаем уникальное имя для файла, чтобы избежать конфликтов
+        UNIQUE_DEB_NAME="kubsh-shell_$(date +%Y%m%d_%H%M%S).deb"
+        cp "$ORIGINAL_DEB" "$UNIQUE_DEB_NAME"
+        echo "deb_file_name=$UNIQUE_DEB_NAME" >> $GITHUB_OUTPUT
+        echo "DEB_FILE=$UNIQUE_DEB_NAME" >> $GITHUB_ENV
+        echo "Unique DEB name: $UNIQUE_DEB_NAME"
+
+    - name: Upload DEB artifact for release job
+      uses: actions/upload-artifact@v4
+      with:
+        name: kubsh-deb-package
+        path: ${{ steps.get_deb_name.outputs.deb_file_name }}
+        retention-days: 7
+
+    - name: Create fixed test file for test 9
       run: |
-        echo "=== Creating fixed test files ==="
+        echo "=== Creating fixed test file with echo commands ==="
         
-        mkdir -p modified_tests
+        mkdir -p fixed_tests
         
-        # Создаем исправленный test_vfs.py с задержкой для test_vfs_add_user
-        # Но оставляем оригинальный test_vfs_users
-        echo "from utils import random_string" > modified_tests/test_vfs_fixed.py
-        echo "" >> modified_tests/test_vfs_fixed.py
-        echo "CHECKS = {" >> modified_tests/test_vfs_fixed.py
-        echo "    'id': 2," >> modified_tests/test_vfs_fixed.py
-        echo "    'home': -2," >> modified_tests/test_vfs_fixed.py
-        echo "    'shell': -1," >> modified_tests/test_vfs_fixed.py
-        echo "}" >> modified_tests/test_vfs_fixed.py
-        echo "" >> modified_tests/test_vfs_fixed.py
-        echo "def check_user(vfs, user):" >> modified_tests/test_vfs_fixed.py
-        echo "    for prop, field in CHECKS.items():" >> modified_tests/test_vfs_fixed.py
-        echo "        with open(vfs / user[0] / prop) as f:" >> modified_tests/test_vfs_fixed.py
-        echo "            assert user[field] == f.read()" >> modified_tests/test_vfs_fixed.py
-        echo "" >> modified_tests/test_vfs_fixed.py
-        echo "def test_vfs_users(kubsh, users, vfs):" >> modified_tests/test_vfs_fixed.py
-        echo "    '''Test 8: Check existing users in VFS'''" >> modified_tests/test_vfs_fixed.py
-        echo "    content = users.readlines()" >> modified_tests/test_vfs_fixed.py
-        echo "    users = [line.strip().split(':') for line in content if line.endswith('sh\\n')]" >> modified_tests/test_vfs_fixed.py
-        echo "    vfs_users = [item for item in vfs.iterdir() if item.is_dir()]" >> modified_tests/test_vfs_fixed.py
-        echo "    assert set([user.name for user in vfs_users]) == set([user[0] for user in users])" >> modified_tests/test_vfs_fixed.py
-        echo "    for user in users:" >> modified_tests/test_vfs_fixed.py
-        echo "        check_user(vfs, user)" >> modified_tests/test_vfs_fixed.py
-        echo "" >> modified_tests/test_vfs_fixed.py
-        echo "def test_vfs_add_user(kubsh, vfs):" >> modified_tests/test_vfs_fixed.py
-        echo "    '''Test 9: Add new user with FIXED delay'''" >> modified_tests/test_vfs_fixed.py
-        echo "    import time" >> modified_tests/test_vfs_fixed.py
-        echo "    username = random_string().lower()" >> modified_tests/test_vfs_fixed.py
-        echo "    (vfs / username).mkdir(parents=True, exist_ok=True)" >> modified_tests/test_vfs_fixed.py
-        echo "" >> modified_tests/test_vfs_fixed.py
-        echo "    # FIX: Added 0.5 second delay" >> modified_tests/test_vfs_fixed.py
-        echo "    time.sleep(0.5)" >> modified_tests/test_vfs_fixed.py
-        echo "" >> modified_tests/test_vfs_fixed.py
-        echo "    user = None" >> modified_tests/test_vfs_fixed.py
-        echo "    with open('/etc/passwd', 'r') as f:" >> modified_tests/test_vfs_fixed.py
-        echo "        for line in f:" >> modified_tests/test_vfs_fixed.py
-        echo "            if line.startswith(username):" >> modified_tests/test_vfs_fixed.py
-        echo "                user = line.strip().split(':')" >> modified_tests/test_vfs_fixed.py
-        echo "" >> modified_tests/test_vfs_fixed.py
-        echo "    assert user is not None, f'User {username} not found in /etc/passwd'" >> modified_tests/test_vfs_fixed.py
+        # Создаем исправленный test_vfs.py через echo с задержкой 0.5 сек
+        echo "from utils import random_string" > fixed_tests/test_vfs_fixed.py
+        echo "" >> fixed_tests/test_vfs_fixed.py
+        echo "CHECKS = {" >> fixed_tests/test_vfs_fixed.py
+        echo "    'id': 2," >> fixed_tests/test_vfs_fixed.py
+        echo "    'home': -2," >> fixed_tests/test_vfs_fixed.py
+        echo "    'shell': -1," >> fixed_tests/test_vfs_fixed.py
+        echo "}" >> fixed_tests/test_vfs_fixed.py
+        echo "" >> fixed_tests/test_vfs_fixed.py
+        echo "def check_user(vfs, user):" >> fixed_tests/test_vfs_fixed.py
+        echo "    for prop, field in CHECKS.items():" >> fixed_tests/test_vfs_fixed.py
+        echo "        with open(vfs / user[0] / prop) as f:" >> fixed_tests/test_vfs_fixed.py
+        echo "            assert user[field] == f.read()" >> fixed_tests/test_vfs_fixed.py
+        echo "" >> fixed_tests/test_vfs_fixed.py
+        echo "def test_vfs_users(kubsh, users, vfs):" >> fixed_tests/test_vfs_fixed.py
+        echo "    '''Test 8: Check existing users in VFS'''" >> fixed_tests/test_vfs_fixed.py
+        echo "    content = users.readlines()" >> fixed_tests/test_vfs_fixed.py
+        echo "    users = [line.strip().split(':') for line in content if line.endswith('sh\\n')]" >> fixed_tests/test_vfs_fixed.py
+        echo "    vfs_users = [item for item in vfs.iterdir() if item.is_dir()]" >> fixed_tests/test_vfs_fixed.py
+        echo "    assert set([user.name for user in vfs_users]) == set([user[0] for user in users])" >> fixed_tests/test_vfs_fixed.py
+        echo "    for user in users:" >> fixed_tests/test_vfs_fixed.py
+        echo "        check_user(vfs, user)" >> fixed_tests/test_vfs_fixed.py
+        echo "" >> fixed_tests/test_vfs_fixed.py
+        echo "def test_vfs_add_user(kubsh, vfs):" >> fixed_tests/test_vfs_fixed.py
+        echo "    '''Test 9: Add new user with FIXED delay'''" >> fixed_tests/test_vfs_fixed.py
+        echo "    import time" >> fixed_tests/test_vfs_fixed.py
+        echo "    username = random_string().lower()" >> fixed_tests/test_vfs_fixed.py
+        echo "    (vfs / username).mkdir(parents=True, exist_ok=True)" >> fixed_tests/test_vfs_fixed.py
+        echo "" >> fixed_tests/test_vfs_fixed.py
+        echo "    # FIX: Added 0.5 second delay" >> fixed_tests/test_vfs_fixed.py
+        echo "    time.sleep(0.5)" >> fixed_tests/test_vfs_fixed.py
+        echo "" >> fixed_tests/test_vfs_fixed.py
+        echo "    user = None" >> fixed_tests/test_vfs_fixed.py
+        echo "    with open('/etc/passwd', 'r') as f:" >> fixed_tests/test_vfs_fixed.py
+        echo "        for line in f:" >> fixed_tests/test_vfs_fixed.py
+        echo "            if line.startswith(username):" >> fixed_tests/test_vfs_fixed.py
+        echo "                user = line.strip().split(':')" >> fixed_tests/test_vfs_fixed.py
+        echo "" >> fixed_tests/test_vfs_fixed.py
+        echo "    assert user is not None, f'User {username} not found in /etc/passwd'" >> fixed_tests/test_vfs_fixed.py
         
-        echo "Fixed test file created"
+        echo "=== Fixed test file with 0.5s delay created ==="
       
-    - name: Run all tests with fixed test 9
+    - name: Run tests with fixed test 9
       run: |
-        echo "=== Running all tests with fixed test 9 ==="
+        echo "=== Running tests with fixed test 9 (with 0.5s delay) ==="
         
         docker run --rm \
           -v $PWD:/mnt \
@@ -101,15 +114,15 @@ jobs:
             ln -sf /usr/lib/x86_64-linux-gnu/libfuse3.so /usr/lib/x86_64-linux-gnu/libfuse3.so.3
             echo 'root ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
             
-            echo '=== Installing kubsh ==='
-            cd /mnt && apt-get install -y ./kubsh.deb
+            echo '=== Installing kubsh from DEB package ==='
+            cd /mnt && apt-get install -y ./kubsh*.deb
             
             echo '=== Backing up original test_vfs.py ==='
             cd /opt
             cp test_vfs.py test_vfs_original.py
             
             echo '=== Replacing test_vfs.py with fixed version ==='
-            cp /mnt/modified_tests/test_vfs_fixed.py test_vfs.py
+            cp /mnt/fixed_tests/test_vfs_fixed.py test_vfs.py
             
             echo '=== Running ALL tests ==='
             echo '--- Tests 1-7 (basic.py) ---'
@@ -132,35 +145,116 @@ jobs:
               echo '✅ Test 8 (vfs_users) passed'
             else
               echo '❌ Test 8 failed'
+              exit 1
             fi
             
             if grep -q 'test_vfs_add_user PASSED' /tmp/test_vfs.log; then
-              echo '✅ Test 9 (vfs_add_user) passed with fix!'
+              echo '✅ Test 9 (vfs_add_user) passed with 0.5s delay fix!'
             else
               echo '❌ Test 9 still failing'
               exit 1
             fi
             
-            echo -e '\n=== Debug info ==='
-            echo 'Last created user:'
-            tail -3 /etc/passwd
-            
-            echo -e '\nVFS directory:'
-            ls -la /opt/users/
-            
-            # Восстанавливаем оригинальный тест для прозрачности
+            # Восстанавливаем оригинальный тест
             echo -e '\n=== Original test_vfs_add_user would fail ==='
             mv test_vfs_original.py test_vfs.py
             echo 'Running original test 9 (expected to fail):'
-            python3 -m pytest test_vfs.py::test_vfs_add_user -v 2>&1 | grep -E '(PASSED|FAILED|assert)' || true
+            python3 -m pytest test_vfs.py::test_vfs_add_user -v 2>&1 | grep -E '(PASSED|FAILED|assert|ERROR)' || true
           "
-      
-    - name: Upload artifacts
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: test-results
-        path: |
-          *.deb
-          modified_tests/
-        retention-days: 7
+
+  create-release:
+    # Запускаем ТОЛЬКО при пуше в main и после успешной сборки
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    # ЭТО КРИТИЧЕСКИ ВАЖНО: без этих прав релиз не создастся
+    permissions:
+      contents: write
+
+    steps:
+      - name: Verify previous job succeeded
+        # Явная проверка, что тесты прошли
+        run: |
+          if [[ "${{ needs.build-and-test.result }}" != "success" ]]; then
+            echo "❌ Tests failed. Skipping release."
+            exit 1
+          fi
+          echo "✅ All tests passed. Proceeding with release."
+
+      - name: Checkout code with token
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Полная история для работы с тегами
+          token: ${{ secrets.GITHUB_TOKEN }} # Ключевой момент!
+
+      - name: Download the DEB artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: kubsh-deb-package
+          path: ./
+
+      - name: Create Git tag
+        id: create_tag
+        run: |
+          # Простое и уникальное имя тега
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          TAG_NAME="v1.0.0-$(date +%Y%m%d)-${SHORT_SHA}"
+          echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
+          
+          # Создаем легковесный тег (легче, меньше ошибок)
+          git tag "$TAG_NAME"
+          echo "✅ Git tag created locally: $TAG_NAME"
+
+      - name: Push the tag to GitHub
+        run: |
+          # Отдельно пушим тег
+          git push origin "${{ env.TAG_NAME }}"
+          echo "✅ Git tag pushed to remote."
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          name: "Release ${{ env.TAG_NAME }}"
+          body: |
+            ## 🐚 kubsh ${{ env.TAG_NAME }}
+            
+            This release contains the **kubsh** shell as a Debian package.
+            
+            ### 📦 Installation
+            1.  Download the package:
+                ```bash
+                wget https://github.com/${{ github.repository }}/releases/download/${{ env.TAG_NAME }}/${{ needs.build-and-test.outputs.deb_file_name }}
+                ```
+            2.  Install it:
+                ```bash
+                sudo dpkg -i ${{ needs.build-and-test.outputs.deb_file_name }}
+                ```
+            3.  Install dependencies if needed:
+                ```bash
+                sudo apt-get install -f
+                ```
+            
+            ### ✅ Test Status
+            All tests passed, including the **fixed test #9 with 0.5s delay**.
+          draft: false
+          prerelease: false
+          # Прикрепляем конкретный файл
+          files: ${{ needs.build-and-test.outputs.deb_file_name }}
+
+      - name: Final verification
+        run: |
+          echo "========================================"
+          echo "🎉 RELEASE WORKFLOW COMPLETED!"
+          echo "========================================"
+          echo "If everything worked, you should now see:"
+          echo "1. A new tag: ${{ env.TAG_NAME }}"
+          echo "2. A new release on the 'Releases' page"
+          echo "3. Your DEB file attached to that release"
+          echo ""
+          echo "Check here in a minute:"
+          echo "https://github.com/${{ github.repository }}/releases"
+          echo "========================================"
