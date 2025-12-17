@@ -376,7 +376,7 @@ int main() {
     } else {
         history_path = "/root/.kubsh_history";
     }
-    std::cout<<"Path of History:"<<history_path<<"\n";
+    std::cout<<"Path of History: "<<history_path<<"\n";
     
     // Инициализация VFS
     init_vfs();
