@@ -181,36 +181,184 @@ jobs:
     - name: Calculate version
       id: version
       run: |
-        TAG=$(git tag --list "1.*.*" --sort=-v:refname | head -n 1 || echo "1.0.0")
-        TAG=${TAG#v}
-        IFS='.' read -r MAJOR MINOR PATCH <<< "$TAG"
+        # Отладочный вывод
+        echo "=== Calculating next version ==="
         
+        # Получаем теги правильно
+        LATEST_TAG=$(git tag --list "v1.*.*" "1.*.*" --sort=-v:refname | head -n 1)
+        
+        if [ -z "$LATEST_TAG" ]; then
+          LATEST_TAG="1.0.0"
+          echo "No tags found, starting from: $LATEST_TAG"
+        else
+          echo "Latest tag found: $LATEST_TAG"
+        fi
+        
+        # Удаляем префикс 'v' если есть
+        LATEST_TAG=${LATEST_TAG#v}
+        echo "Tag without 'v' prefix: $LATEST_TAG"
+        
+        # Разбираем версию
+        IFS='.' read -r MAJOR MINOR PATCH <<< "$LATEST_TAG"
+        echo "Parsed: MAJOR=$MAJOR, MINOR=$MINOR, PATCH=$PATCH"
+        
+        # Проверяем что числа
+        if ! [[ "$MAJOR" =~ ^[0-9]+$ ]] || ! [[ "$MINOR" =~ ^[0-9]+$ ]] || ! [[ "$PATCH" =~ ^[0-9]+$ ]]; then
+          echo "ERROR: Invalid version format: $LATEST_TAG"
+          echo "Resetting to 1.0.0"
+          MAJOR=1
+          MINOR=0
+          PATCH=0
+        fi
+        
+        # Увеличиваем PATCH
         PATCH=$((PATCH + 1))
+        echo "Increased PATCH to: $PATCH"
+        
+        # Если PATCH >= 10, увеличиваем MINOR
         if [ $PATCH -ge 10 ]; then
+          echo "PATCH reached 10, increasing MINOR"
           PATCH=0
           MINOR=$((MINOR + 1))
         fi
         
+        # Формируем новую версию
         NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+        echo "New version: $NEW_VERSION"
+        
+        # Проверяем что версия валидна
+        if [[ ! "$NEW_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "ERROR: Invalid version generated: $NEW_VERSION"
+          exit 1
+        fi
+        
         echo "VERSION=$NEW_VERSION" >> $GITHUB_ENV
+        echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+        
+        # Дублируем в файл для отладки
+        echo "$NEW_VERSION" > /tmp/version.txt
+        echo "Version saved to /tmp/version.txt"
+    
+    - name: Debug version
+      run: |
+        echo "=== DEBUG ==="
+        echo "GITHUB_ENV VERSION: ${{ env.VERSION }}"
+        echo "GITHUB_OUTPUT version: ${{ steps.version.outputs.version }}"
+        echo "Trying to read from file:"
+        cat /tmp/version.txt 2>/dev/null || echo "File not found"
+        echo "=== END DEBUG ==="
+        
+        if [ -z "${{ env.VERSION }}" ]; then
+          echo "ERROR: VERSION is empty!"
+          exit 1
+        fi
     
     - name: Rename package
       run: |
-        DEB=$(ls kubsh*.deb)
-        mv "$DEB" "kubsh_${{ env.VERSION }}_amd64.deb"
-        echo "DEB_FILE=kubsh_${{ env.VERSION }}_amd64.deb" >> $GITHUB_ENV
+        echo "Renaming package with version: ${{ env.VERSION }}"
+        
+        # Находим скачанный файл
+        DEB_FILES=(kubsh*.deb)
+        if [ ${#DEB_FILES[@]} -eq 0 ]; then
+          echo "ERROR: No DEB files found!"
+          ls -la
+          exit 1
+        fi
+        
+        ORIGINAL_DEB="${DEB_FILES[0]}"
+        echo "Original DEB: $ORIGINAL_DEB"
+        
+        NEW_DEB="kubsh_${{ env.VERSION }}_amd64.deb"
+        echo "New DEB name: $NEW_DEB"
+        
+        mv "$ORIGINAL_DEB" "$NEW_DEB"
+        echo "DEB_FILE=$NEW_DEB" >> $GITHUB_ENV
+        
+        # Проверяем что файл существует
+        if [ ! -f "$NEW_DEB" ]; then
+          echo "ERROR: Failed to rename DEB file!"
+          exit 1
+        fi
+        
+        echo "File renamed successfully:"
+        ls -la "$NEW_DEB"
     
-    - name: Tag and release
+    - name: Create Git tag
       run: |
+        echo "=== Creating Git tag ==="
+        echo "Version: ${{ env.VERSION }}"
+        
+        # Проверяем что версия не пустая
+        if [ -z "${{ env.VERSION }}" ]; then
+          echo "ERROR: VERSION is empty, cannot create tag"
+          exit 1
+        fi
+        
+        # Проверяем формат версии
+        if [[ ! "${{ env.VERSION }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "ERROR: Invalid version format: ${{ env.VERSION }}"
+          exit 1
+        fi
+        
+        TAG_NAME="v${{ env.VERSION }}"
+        echo "Creating tag: $TAG_NAME"
+        
+        # Настраиваем git
         git config user.name "GitHub Actions"
         git config user.email "actions@github.com"
-        git tag -a "v${{ env.VERSION }}" -m "Release v${{ env.VERSION }}"
-        git push origin "v${{ env.VERSION }}"
+        
+        # Создаем аннотированный тег
+        git tag -a "$TAG_NAME" -m "Release $TAG_NAME
+        
+        Automated release with version ${{ env.VERSION }}
+        All tests passed successfully."
+        
+        # Проверяем что тег создан
+        if git show-ref --tags "$TAG_NAME"; then
+          echo "✅ Tag created locally: $TAG_NAME"
+        else
+          echo "❌ Failed to create tag"
+          exit 1
+        fi
     
-    - name: Create Release
+    - name: Push the tag
+      run: |
+        echo "=== Pushing tag to GitHub ==="
+        TAG_NAME="v${{ env.VERSION }}"
+        echo "Pushing tag: $TAG_NAME"
+        
+        # Проверяем что тег существует локально
+        if ! git show-ref --tags "$TAG_NAME"; then
+          echo "ERROR: Tag $TAG_NAME not found locally"
+          exit 1
+        fi
+        
+        # Пушим тег
+        git push origin "$TAG_NAME"
+        
+        echo "✅ Tag pushed successfully"
+    
+    - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         tag_name: v${{ env.VERSION }}
         name: "kubsh v${{ env.VERSION }}"
-        body: "Automated release - all tests passed"
-        files: ${{ env.DEB_FILE }}
+        body: |
+          ## 🐚 kubsh v${{ env.VERSION }}
+          
+          Automated release with smart versioning.
+          
+          ### 📦 Installation
+          ```bash
+          wget https://github.com/${{ github.repository }}/releases/download/v${{ env.VERSION }}/kubsh_${{ env.VERSION }}_amd64.deb
+          sudo dpkg -i kubsh_${{ env.VERSION }}_amd64.deb
+          sudo apt-get install -f
+          ```
+          
+          ### ✅ Test Status
+          All tests passed, including test #9 with 0.5s delay fix.
+        draft: false
+        prerelease: false
+        files: kubsh_${{ env.VERSION }}_amd64.deb
