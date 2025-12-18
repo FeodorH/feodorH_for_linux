@@ -9,7 +9,6 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-    # Джоб сборки и тестов НЕ требует прав на запись
     permissions:
       contents: read
     outputs:
@@ -31,7 +30,6 @@ jobs:
       id: get_deb_name
       run: |
         ORIGINAL_DEB=$(ls kubsh*.deb | head -1)
-        # Создаем уникальное имя для файла, чтобы избежать конфликтов
         UNIQUE_DEB_NAME="kubsh-shell_$(date +%Y%m%d_%H%M%S).deb"
         cp "$ORIGINAL_DEB" "$UNIQUE_DEB_NAME"
         echo "deb_file_name=$UNIQUE_DEB_NAME" >> $GITHUB_OUTPUT
@@ -162,99 +160,57 @@ jobs:
             python3 -m pytest test_vfs.py::test_vfs_add_user -v 2>&1 | grep -E '(PASSED|FAILED|assert|ERROR)' || true
           "
 
-  create-release:
-    # Запускаем ТОЛЬКО при пуше в main и после успешной сборки
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  release:
     needs: build-and-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    # ЭТО КРИТИЧЕСКИ ВАЖНО: без этих прав релиз не создастся
     permissions:
       contents: write
-
+    
     steps:
-      - name: Verify previous job succeeded
-        # Явная проверка, что тесты прошли
-        run: |
-          if [[ "${{ needs.build-and-test.result }}" != "success" ]]; then
-            echo "❌ Tests failed. Skipping release."
-            exit 1
-          fi
-          echo "✅ All tests passed. Proceeding with release."
-
-      - name: Checkout code with token
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # Полная история для работы с тегами
-          token: ${{ secrets.GITHUB_TOKEN }} # Ключевой момент!
-
-      - name: Download the DEB artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: kubsh-deb-package
-          path: ./
-
-      - name: Create Git tag
-        id: create_tag
-        run: |
-          # Простое и уникальное имя тега
-          SHORT_SHA="${GITHUB_SHA:0:7}"
-          TAG_NAME="v1.0.0-$(date +%Y%m%d)-${SHORT_SHA}"
-          echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
-          
-          # Создаем легковесный тег (легче, меньше ошибок)
-          git tag "$TAG_NAME"
-          echo "✅ Git tag created locally: $TAG_NAME"
-
-      - name: Push the tag to GitHub
-        run: |
-          # Отдельно пушим тег
-          git push origin "${{ env.TAG_NAME }}"
-          echo "✅ Git tag pushed to remote."
-
-      - name: Create GitHub Release
-        id: create_release
-        uses: softprops/action-gh-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ env.TAG_NAME }}
-          name: "Release ${{ env.TAG_NAME }}"
-          body: |
-            ## 🐚 kubsh ${{ env.TAG_NAME }}
-            
-            This release contains the **kubsh** shell as a Debian package.
-            
-            ### 📦 Installation
-            1.  Download the package:
-                ```bash
-                wget https://github.com/${{ github.repository }}/releases/download/${{ env.TAG_NAME }}/${{ needs.build-and-test.outputs.deb_file_name }}
-                ```
-            2.  Install it:
-                ```bash
-                sudo dpkg -i ${{ needs.build-and-test.outputs.deb_file_name }}
-                ```
-            3.  Install dependencies if needed:
-                ```bash
-                sudo apt-get install -f
-                ```
-            
-            ### ✅ Test Status
-            All tests passed, including the **fixed test #9 with 0.5s delay**.
-          draft: false
-          prerelease: false
-          # Прикрепляем конкретный файл
-          files: ${{ needs.build-and-test.outputs.deb_file_name }}
-
-      - name: Final verification
-        run: |
-          echo "========================================"
-          echo "🎉 RELEASE WORKFLOW COMPLETED!"
-          echo "========================================"
-          echo "If everything worked, you should now see:"
-          echo "1. A new tag: ${{ env.TAG_NAME }}"
-          echo "2. A new release on the 'Releases' page"
-          echo "3. Your DEB file attached to that release"
-          echo ""
-          echo "Check here in a minute:"
-          echo "https://github.com/${{ github.repository }}/releases"
-          echo "========================================"
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Download artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: kubsh-deb-package
+    
+    - name: Calculate version
+      id: version
+      run: |
+        TAG=$(git tag --list "1.*.*" --sort=-v:refname | head -n 1 || echo "1.0.0")
+        TAG=${TAG#v}
+        IFS='.' read -r MAJOR MINOR PATCH <<< "$TAG"
+        
+        PATCH=$((PATCH + 1))
+        if [ $PATCH -ge 10 ]; then
+          PATCH=0
+          MINOR=$((MINOR + 1))
+        fi
+        
+        NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+        echo "VERSION=$NEW_VERSION" >> $GITHUB_ENV
+    
+    - name: Rename package
+      run: |
+        DEB=$(ls kubsh*.deb)
+        mv "$DEB" "kubsh_${{ env.VERSION }}_amd64.deb"
+        echo "DEB_FILE=kubsh_${{ env.VERSION }}_amd64.deb" >> $GITHUB_ENV
+    
+    - name: Tag and release
+      run: |
+        git config user.name "GitHub Actions"
+        git config user.email "actions@github.com"
+        git tag -a "v${{ env.VERSION }}" -m "Release v${{ env.VERSION }}"
+        git push origin "v${{ env.VERSION }}"
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v${{ env.VERSION }}
+        name: "kubsh v${{ env.VERSION }}"
+        body: "Automated release - all tests passed"
+        files: ${{ env.DEB_FILE }}
